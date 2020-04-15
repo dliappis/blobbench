@@ -3,18 +3,21 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/dliappis/blobbench/internal"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 
-type serviceTime struct {
+type metricRecord struct {
 	index    int
+	size     int
 	file     string
 	FirstGet time.Duration
 	LastGet  time.Duration
@@ -48,9 +51,9 @@ type worker struct {
 }
 
 type taskStruct struct {
-	workerFunc func(int, *s3.Client, chan<- serviceTime)
+	workerFunc func(int, *s3.Client, chan<- metricRecord)
 	filesuffix int
-	results    chan<- serviceTime
+	results    chan<- metricRecord
 	s3client   *s3.Client
 }
 
@@ -109,7 +112,7 @@ func initDownload(cmd *cobra.Command, args []string) {
 	// maybe move this up
 	s3client := s3.New(internal.SetupS3Client(Region))
 
-	results := make(chan serviceTime, numWorkers*numFiles)
+	results := make(chan metricRecord, numWorkers*numFiles)
 
 	for i := 1; i <= numFiles; i++ {
 		ctx := context.Background()
@@ -128,56 +131,57 @@ func initDownload(cmd *cobra.Command, args []string) {
 	color.Green(">>> Threadpool exited")
 	close(results)
 
-	for ss := range results {
-		color.Green("Sample %d, Suffix: %s, FirstGet %v, LastGet %v", ss.index, ss.file, ss.FirstGet, ss.LastGet)
+	color.Yellow("Results following\n")
+	color.Green("Sample|File|TimeToFirstGet|TimeToLastGet|Size")
+	for res := range results {
+		color.Green("%d|%s|%s|%s|%d|", res.index, res.file, res.FirstGet, res.LastGet, res.size)
 	}
 
 }
 
-func downloadTask(filesuffix int, s3client *s3.Client, results chan<- serviceTime) {
+func downloadTask(filesuffix int, s3client *s3.Client, results chan<- metricRecord) {
 	key := fmt.Sprintf("%s/%s%s%0*d", basedir, prefix, suffixseparator, suffixdigits, filesuffix)
 	color.HiMagenta("DEBUG working on file [%s/%s]", BucketName, key)
 	stopwatch := time.Now()
-	time.Sleep(1 * time.Second)
-	// req := s3client.GetObjectRequest(&s3.GetObjectInput{
-	// 	Bucket: aws.String(BucketName),
-	// 	Key:    aws.String(key),
-	// })
+	req := s3client.GetObjectRequest(&s3.GetObjectInput{
+		Bucket: aws.String(BucketName),
+		Key:    aws.String(key),
+	})
 
-	// resp, err := req.Send(context.Background())
+	resp, err := req.Send(context.Background())
 
-	// if err != nil {
-	// 	panic("Failed to get object: " + err.Error())
-	// }
+	if err != nil {
+		panic("Failed to get object: " + err.Error())
+	}
 
 	firstGet := time.Now().Sub(stopwatch)
 
-	// // create a buffer to copy the S3 object body to
-	// // TODO specify somewhere the buffer size, for now it's 1MB
-	// var buf = make([]byte, bufferSize)
+	// create a buffer to copy the S3 object body to
+	// TODO specify somewhere the buffer size, for now it's 1MB
+	var buf = make([]byte, bufferSize)
 
-	// // read the s3 object body into the buffer
-	// size := 0
-	// for {
-	// 	n, err := resp.Body.Read(buf)
+	// read the s3 object body into the buffer
+	size := 0
+	for {
+		n, err := resp.Body.Read(buf)
 
-	// 	size += n
+		size += n
 
-	// 	if err == io.EOF {
-	// 		break
-	// 	}
+		if err == io.EOF {
+			break
+		}
 
-	// 	// if the streaming fails, exit
-	// 	if err != nil {
-	// 		// TODO see https://docs.aws.amazon.com/sdk-for-go/v1/developer-guide/handling-errors.html
-	// 		panic("Error reading object body: " + err.Error())
-	// 	}
-	// }
+		// if the streaming fails, exit
+		if err != nil {
+			// TODO see https://docs.aws.amazon.com/sdk-for-go/v1/developer-guide/handling-errors.html
+			panic("Error reading object body: " + err.Error())
+		}
+	}
 
-	// _ = resp.Body.Close()
+	_ = resp.Body.Close()
 
 	lastGet := time.Now().Sub(stopwatch)
 
 	// send measurements
-	results <- serviceTime{FirstGet: firstGet, LastGet: lastGet, index: filesuffix, file: fmt.Sprintf("%s", key)}
+	results <- metricRecord{FirstGet: firstGet, LastGet: lastGet, index: filesuffix, file: fmt.Sprintf("%s", key), size: size}
 }
