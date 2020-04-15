@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"sort"
 	"strings"
@@ -22,7 +21,7 @@ import (
 // MetricRecord contains metric records for a specific invocation of processFile
 type MetricRecord struct {
 	idx      int
-	size     int64
+	size     int
 	file     string
 	FirstGet time.Duration
 	LastGet  time.Duration
@@ -153,9 +152,11 @@ func processFile(s3client *s3.Client, suffix int, results *Results) error {
 
 	firstGet := time.Now().Sub(stopwatch)
 
-	var size int64
+	// create a buffer to copy the S3 object body to
+	var buf = make([]byte, bufferSize)
+	var size int
 	for {
-		n, err := io.Copy(ioutil.Discard, resp.Body)
+		n, err := resp.Body.Read(buf)
 
 		size += n
 
