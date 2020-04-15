@@ -4,23 +4,55 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/dliappis/blobbench/internal"
+	"github.com/dliappis/blobbench/internal/pool"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 
-type metricRecord struct {
-	index    int
-	size     int
+// MetricRecord contains metric records for a specific invocation of processFile
+type MetricRecord struct {
+	idx      int
+	size     int64
 	file     string
 	FirstGet time.Duration
 	LastGet  time.Duration
+}
+
+// ByIdx implements sort.Interface based on the idx field and lets us sort MetricRecord slices
+type ByIdx []MetricRecord
+
+func (item ByIdx) Len() int           { return len(item) }
+func (item ByIdx) Less(i, j int) bool { return item[i].idx < item[j].idx }
+func (item ByIdx) Swap(i, j int)      { item[i], item[j] = item[j], item[i] }
+
+// Results contains all metric records from executed processFile tasks
+type Results struct {
+	sync.Mutex
+	items []MetricRecord
+}
+
+// Items race-condition-safe method to return Results items
+func (r *Results) Items() []MetricRecord {
+	r.Lock()
+	defer r.Unlock()
+	return r.items
+}
+
+// Push race-confition-safe method to push into Results
+func (r *Results) Push(v MetricRecord) {
+	r.Lock()
+	defer r.Unlock()
+	r.items = append(r.items, v)
 }
 
 const bufferSize uint64 = 1024 * 8 // 8 kilobytes
@@ -33,9 +65,6 @@ var (
 	numWorkers             int
 	bufsize                uint64
 
-	wg    sync.WaitGroup
-	queue = make(chan taskStruct, numWorkers)
-
 	downloadCmd = &cobra.Command{
 		Use:   "download",
 		Short: "Download ...",
@@ -43,45 +72,6 @@ var (
 		Run:   initDownload,
 	}
 )
-
-type worker struct {
-	id int
-	ch <-chan taskStruct
-	wg *sync.WaitGroup
-}
-
-type taskStruct struct {
-	workerFunc func(int, *s3.Client, chan<- metricRecord)
-	filesuffix int
-	results    chan<- metricRecord
-	s3client   *s3.Client
-}
-
-func (w *worker) run() {
-	go func() {
-		defer w.wg.Done()
-		for tStruct := range w.ch {
-			// call the work function here
-			color.Yellow("About to start %d", tStruct.filesuffix)
-			tStruct.workerFunc(tStruct.filesuffix, tStruct.s3client, tStruct.results)
-		}
-	}()
-}
-
-func add(ctx context.Context, task taskStruct) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case queue <- task:
-	}
-	return nil
-}
-
-func wait() error {
-	close(queue)
-	wg.Wait()
-	return nil
-}
 
 func init() {
 	rootCmd.AddCommand(downloadCmd)
@@ -102,47 +92,54 @@ func init() {
 }
 
 func initDownload(cmd *cobra.Command, args []string) {
-	color.Green("Initializing pool with workers")
-	for i := 1; i <= numWorkers; i++ {
-		w := worker{id: i, ch: queue, wg: &wg}
-		w.run()
-	}
-	wg.Add(numWorkers)
-
-	// maybe move this up
 	s3client := s3.New(internal.SetupS3Client(Region))
+	color.Green(">>> Threadpool started")
 
-	results := make(chan metricRecord, numWorkers*numFiles)
+	pool, _ := pool.NewPool(pool.Config{NumWorkers: numWorkers})
+	results := &Results{}
 
 	for i := 1; i <= numFiles; i++ {
 		ctx := context.Background()
 
-		tStruct := taskStruct{filesuffix: i, results: results, s3client: s3client, workerFunc: downloadTask}
-		if err := add(ctx, tStruct); err != nil {
+		suffix := i
+		task := func() {
+			// ----- TaskFunc definition -------------------------------
+			err := processFile(s3client, suffix, results)
+			// ---------------------------------------------------------
+			if err != nil {
+				color.Red("ERROR: ", err)
+			}
+		}
+
+		if err := pool.Add(ctx, task); err != nil {
 			color.Red("ERROR: Adding item: %s", err)
 			os.Exit(1)
 		}
 	}
 
-	if err := wait(); err != nil {
-		color.Red("ERROR: Close: %s", err)
+	if err := pool.Wait(); err != nil {
+		color.Red("ERROR: Closing: %s", err)
 	}
 
-	color.Green(">>> Threadpool exited")
-	close(results)
+	color.Green(">>> Threadpool exited\n\n")
 
 	color.Yellow("Results following\n")
-	color.Green("Sample|File|TimeToFirstGet|TimeToLastGet|Size")
-	for res := range results {
-		color.Green("%d|%s|%s|%s|%d|", res.index, res.file, res.FirstGet, res.LastGet, res.size)
-	}
+	color.Yellow(strings.Repeat("-", 80))
 
+	color.Green("Sample|File|TimeToFirstGet (ms)|TimeToLastGet (ms)|Size (MB)")
+	sort.Sort(ByIdx(results.Items()))
+	for _, v := range results.Items() {
+		color.Green("%d|%s|%.1f|%.1f|%.1f|", v.idx, v.file, float64(v.FirstGet/time.Millisecond), float64(v.LastGet/time.Millisecond), float64(v.size/1024))
+	}
+	fmt.Println()
 }
 
-func downloadTask(filesuffix int, s3client *s3.Client, results chan<- metricRecord) {
-	key := fmt.Sprintf("%s/%s%s%0*d", basedir, prefix, suffixseparator, suffixdigits, filesuffix)
+func processFile(s3client *s3.Client, suffix int, results *Results) error {
+	key := fmt.Sprintf("%s/%s%s%0*d", basedir, prefix, suffixseparator, suffixdigits, suffix)
 	color.HiMagenta("DEBUG working on file [%s/%s]", BucketName, key)
+
 	stopwatch := time.Now()
+
 	req := s3client.GetObjectRequest(&s3.GetObjectInput{
 		Bucket: aws.String(BucketName),
 		Key:    aws.String(key),
@@ -156,14 +153,10 @@ func downloadTask(filesuffix int, s3client *s3.Client, results chan<- metricReco
 
 	firstGet := time.Now().Sub(stopwatch)
 
-	// create a buffer to copy the S3 object body to
-	// TODO specify somewhere the buffer size, for now it's 1MB
-	var buf = make([]byte, bufferSize)
-
 	// read the s3 object body into the buffer
-	size := 0
+	var size int64
 	for {
-		n, err := resp.Body.Read(buf)
+		n, err := io.Copy(ioutil.Discard, resp.Body)
 
 		size += n
 
@@ -182,6 +175,6 @@ func downloadTask(filesuffix int, s3client *s3.Client, results chan<- metricReco
 
 	lastGet := time.Now().Sub(stopwatch)
 
-	// send measurements
-	results <- metricRecord{FirstGet: firstGet, LastGet: lastGet, index: filesuffix, file: fmt.Sprintf("%s", key), size: size}
+	results.Push(MetricRecord{FirstGet: firstGet, LastGet: lastGet, idx: suffix, file: fmt.Sprintf("%s", key), size: size})
+	return nil
 }
