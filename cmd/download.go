@@ -91,13 +91,14 @@ func init() {
 }
 
 func initDownload(cmd *cobra.Command, args []string) {
+	startTime := time.Now()
 	s3client := s3.New(internal.SetupS3Client(Region))
 	color.Green(">>> Threadpool started")
 
 	pool, _ := pool.NewPool(pool.Config{NumWorkers: numWorkers})
 	results := &Results{}
 
-	for i := 1; i <= numFiles; i++ {
+	for i := 0; i < numFiles; i++ {
 		ctx := context.Background()
 
 		suffix := i
@@ -128,8 +129,9 @@ func initDownload(cmd *cobra.Command, args []string) {
 	color.Green("Sample|File|TimeToFirstGet (ms)|TimeToLastGet (ms)|Size (MB)")
 	sort.Sort(ByIdx(results.Items()))
 	for _, v := range results.Items() {
-		color.Green("%d|%s|%.1f|%.1f|%.1f|", v.idx, v.file, float64(v.FirstGet/time.Millisecond), float64(v.LastGet/time.Millisecond), float64(v.size/1024))
+		color.Green("%d|%s|%.1f|%.1f|%.1f", v.idx, v.file, float64(v.FirstGet/time.Millisecond), float64(v.LastGet/time.Millisecond), float64(v.size/1024))
 	}
+	color.Green("\nTotal execution time: %s", time.Since(startTime))
 	fmt.Println()
 }
 
