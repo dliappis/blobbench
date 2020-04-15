@@ -153,7 +153,6 @@ func processFile(s3client *s3.Client, suffix int, results *Results) error {
 
 	firstGet := time.Now().Sub(stopwatch)
 
-	// read the s3 object body into the buffer
 	var size int64
 	for {
 		n, err := io.Copy(ioutil.Discard, resp.Body)
