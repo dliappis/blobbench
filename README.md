@@ -57,22 +57,16 @@ Finally the number of parallel workers can be configured using `--workers` (defa
 
 The download schedule will be:
 
-| Start time | Worker # | File | Duration |
-| ---------- | -------- | ---- | ---------------- |
-| t0         | 1        | file-00 | dur0          |
-| t0         | 2        | file-01 | dur1          |
-
-... assuming dur0 < dur1, worked 1 finishes first ...
-
-| t0+dur0 | 1 | file-02 | dur2 |
-
-... here worker 2 finishes ...
-
-| t0+dur1 | 2 | file-03 | dur3 |
-
-... and again dur2<dur3 so worker 1 finishes first and downloads the final file ...
-
-| t0+dur0+dur2 | 1 file-04 | dur4 |
+| Start time                                                                          | Worker #  | File    | Duration         |
+| ----------                                                                          | --------  | ----    | ---------------- |
+| t0                                                                                  | 1         | file-00 | dur0             |
+| t0                                                                                  | 2         | file-01 | dur1             |
+| ... assuming `dur0 < dur1`, worker 1 finishes first ...                           |           |         |                  |
+| t0+dur0                                                                             | 1         | file-02 | dur2             |
+| ... here worker 2 finishes ...                                                      |           |         |                  |
+| t0+dur1                                                                             | 2         | file-03 | dur3             |
+| ... and again `dur2 < dur3` so worker 1 finishes first and downloads the final file ... |           |         |                  |
+| t0+dur0+dur2                                                                        | 1 file-04 | dur4    |                  |
 
 ## Reports
 
