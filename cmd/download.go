@@ -1,9 +1,12 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
+	"math"
+	"math/rand"
 	"os"
 	"sort"
 	"strings"
@@ -11,6 +14,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/awserr"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/dliappis/blobbench/internal"
 	"github.com/dliappis/blobbench/internal/pool"
@@ -20,11 +24,19 @@ import (
 
 // MetricRecord contains metric records for a specific invocation of processFile
 type MetricRecord struct {
-	idx      int
-	size     int
-	file     string
-	FirstGet time.Duration
-	LastGet  time.Duration
+	idx        int
+	size       int
+	file       string
+	FirstGet   time.Duration
+	LastGet    time.Duration
+	success    bool
+	errDetails metricError
+}
+
+// metricError contains error records for a specific invocation of processFile
+type metricError struct {
+	code    string
+	message string
 }
 
 // ByIdx implements sort.Interface based on the idx field and lets us sort MetricRecord slices
@@ -40,14 +52,16 @@ type Results struct {
 	items []MetricRecord
 }
 
-// Items race-condition-safe method to return Results items
+// Items returns Results items.
+// It is safe to call it concurrently.
 func (r *Results) Items() []MetricRecord {
 	r.Lock()
 	defer r.Unlock()
 	return r.items
 }
 
-// Push race-confition-safe method to push into Results
+// Push adds an item into Results.
+// It is safe to call it concurrently.
 func (r *Results) Push(v MetricRecord) {
 	r.Lock()
 	defer r.Unlock()
@@ -82,12 +96,10 @@ func init() {
 	downloadCmd.Flags().IntVar(&numFiles, "numfiles", 2, "How many files")
 	downloadCmd.MarkFlagRequired("numfiles")
 	downloadCmd.Flags().IntVar(&suffixdigits, "suffixdigits", 4, "suffix digits, should start from 0, e.g. 4 for -0000")
-	downloadCmd.MarkFlagRequired("suffixdigits")
 	downloadCmd.Flags().StringVar(&suffixseparator, "suffixsep", "-", "The separator for suffix e.g. 0 for -0000.")
 
 	downloadCmd.Flags().IntVar(&numWorkers, "workers", 5, "Amount of parallel download workers")
 	downloadCmd.Flags().Uint64Var(&bufsize, "bufsize", 1024, "Buf size to use while download (per worker)")
-
 }
 
 func initDownload(cmd *cobra.Command, args []string) {
@@ -100,12 +112,15 @@ func initDownload(cmd *cobra.Command, args []string) {
 
 	for i := 0; i < numFiles; i++ {
 		ctx := context.Background()
-
+		var err error
+		var task func()
 		suffix := i
-		task := func() {
+
+		task = func() {
 			// ----- TaskFunc definition -------------------------------
-			err := processFile(s3client, suffix, results)
+			err = processFile(s3client, suffix, results)
 			// ---------------------------------------------------------
+
 			if err != nil {
 				color.Red("ERROR: ", err)
 			}
@@ -123,21 +138,24 @@ func initDownload(cmd *cobra.Command, args []string) {
 
 	color.Green(">>> Threadpool exited\n\n")
 
-	color.Yellow("Results following\n")
-	color.Yellow(strings.Repeat("-", 80))
-
-	color.Green("Sample|File|TimeToFirstGet (ms)|TimeToLastGet (ms)|Size (MB)")
-	sort.Sort(ByIdx(results.Items()))
-	for _, v := range results.Items() {
-		color.Green("%d|%s|%.1f|%.1f|%.1f", v.idx, v.file, float64(v.FirstGet/time.Millisecond), float64(v.LastGet/time.Millisecond), float64(v.size/1024))
-	}
-	color.Green("\nTotal execution time: %s", time.Since(startTime))
-	fmt.Println()
+	duration := time.Since(startTime)
+	printResults(results, duration)
 }
 
 func processFile(s3client *s3.Client, suffix int, results *Results) error {
+	if DryRun {
+		return processFileDryRun(suffix, results)
+	} else {
+		return processFileAWS(s3client, suffix, results)
+	}
+}
+
+func processFileAWS(s3client *s3.Client, suffix int, results *Results) error {
 	key := fmt.Sprintf("%s/%s%s%0*d", basedir, prefix, suffixseparator, suffixdigits, suffix)
 	color.HiMagenta("DEBUG working on file [%s/%s]", BucketName, key)
+	var metricRecord MetricRecord
+	metricRecord.file = key
+	metricRecord.idx = suffix
 
 	stopwatch := time.Now()
 
@@ -149,7 +167,13 @@ func processFile(s3client *s3.Client, suffix int, results *Results) error {
 	resp, err := req.Send(context.Background())
 
 	if err != nil {
-		panic("Failed to get object: " + err.Error())
+		metricRecord.FirstGet = math.MaxInt64
+		metricRecord.LastGet = math.MaxInt64
+		metricRecord.size = -1
+		metricRecord.success = false
+		metricRecord.errDetails = processAWSError(err)
+		results.Push(metricRecord)
+		return err
 	}
 
 	firstGet := time.Now().Sub(stopwatch)
@@ -168,8 +192,13 @@ func processFile(s3client *s3.Client, suffix int, results *Results) error {
 
 		// if the streaming fails, exit
 		if err != nil {
-			// TODO see https://docs.aws.amazon.com/sdk-for-go/v1/developer-guide/handling-errors.html
-			panic("Error reading object body: " + err.Error())
+			metricRecord.FirstGet = firstGet
+			metricRecord.LastGet = -1
+			metricRecord.size = size
+			metricRecord.success = false
+			metricRecord.errDetails = processAWSError(err)
+			results.Push(metricRecord)
+			return err
 		}
 	}
 
@@ -177,6 +206,87 @@ func processFile(s3client *s3.Client, suffix int, results *Results) error {
 
 	lastGet := time.Now().Sub(stopwatch)
 
-	results.Push(MetricRecord{FirstGet: firstGet, LastGet: lastGet, idx: suffix, file: fmt.Sprintf("%s", key), size: size})
+	results.Push(MetricRecord{FirstGet: firstGet, LastGet: lastGet, idx: suffix, file: fmt.Sprintf("%s", key), size: size, success: true})
 	return nil
+}
+
+func processFileDryRun(suffix int, results *Results) error {
+	key := fmt.Sprintf("%s/%s%s%0*d", basedir, prefix, suffixseparator, suffixdigits, suffix)
+	color.HiMagenta("DEBUG working on file [%s/%s]", BucketName, key)
+	var metricRecord MetricRecord
+	metricRecord.file = key
+	metricRecord.idx = suffix
+
+	stopwatch := time.Now()
+
+	// wait up to 500ms
+	time.Sleep(time.Millisecond * time.Duration(rand.Float32()*500))
+
+	firstGet := time.Now().Sub(stopwatch)
+
+	time.Sleep(time.Millisecond * time.Duration(rand.Float32()*500))
+
+	lastGet := time.Now().Sub(stopwatch)
+
+	results.Push(MetricRecord{FirstGet: firstGet, LastGet: lastGet, idx: suffix, file: fmt.Sprintf("%s", key), size: rand.Intn(1024 * 1024 * 1024), success: true})
+	return nil
+}
+
+func processAWSError(err error) metricError {
+	// https://docs.aws.amazon.com/sdk-for-go/v1/developer-guide/handling-errors.html
+	if aerr, ok := err.(awserr.Error); ok {
+		return metricError{code: aerr.Code(), message: aerr.Message()}
+	}
+	return metricError{}
+}
+
+func printResults(results *Results, duration time.Duration) {
+	sort.Sort(ByIdx(results.Items()))
+	if OutputFile == "" {
+		printResultsStdout(results, duration)
+	} else {
+		printResultsFile(results, duration)
+	}
+}
+
+func printResultsStdout(results *Results, duration time.Duration) {
+	color.Yellow("\nResults following\n")
+	color.Yellow(strings.Repeat("-", 90))
+
+	color.Green("Sample|File|TimeToFirstGet (ms)|TimeToLastGet (ms)|Size (MB)|Success|Err Code|Err Message")
+	sort.Sort(ByIdx(results.Items()))
+	for _, v := range results.Items() {
+		color.Green("%d|%s|%.1f|%.1f|%.1f|%t|%s|%s", v.idx, v.file, float64(v.FirstGet/time.Millisecond), float64(v.LastGet/time.Millisecond), float64(v.size/1024), v.success, v.errDetails.code, v.errDetails.message)
+	}
+	color.Green("\nTotal execution time: %s", duration)
+	fmt.Println()
+}
+
+func printResultsFile(results *Results, duration time.Duration) {
+	f, err := os.Create(OutputFile)
+	if err != nil {
+		color.Red("Unable to write to [%s], err [%s]. Printing to stdout instead.", OutputFile, err)
+		printResultsStdout(results, duration)
+	}
+	defer f.Close()
+
+	w := bufio.NewWriter(f)
+
+	_, err = fmt.Fprintf(w, "Sample|File|TimeToFirstGet (ms)|TimeToLastGet (ms)|Size (MB)|Success|Err Code|Err Message\n")
+	checkWriteErr(err)
+
+	for _, v := range results.Items() {
+		_, err = fmt.Fprintf(w, "%d|%s|%.1f|%.1f|%.1f|%t|%s|%s\n", v.idx, v.file, float64(v.FirstGet/time.Millisecond), float64(v.LastGet/time.Millisecond), float64(v.size/1024), v.success, v.errDetails.code, v.errDetails.message)
+		checkWriteErr(err)
+	}
+
+	_, err = fmt.Fprintf(w, "\nTotal execution time: %s\n", duration)
+	checkWriteErr(err)
+	w.Flush()
+}
+
+func checkWriteErr(err error) {
+	if err != nil {
+		panic(err)
+	}
 }

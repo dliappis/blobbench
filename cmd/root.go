@@ -12,6 +12,12 @@ var Region string
 // BucketName ...
 var BucketName string
 
+// DryRun mocks all operations if true
+var DryRun bool
+
+// OutputFile is the filename where results will be written
+var OutputFile string
+
 var (
 	userLicense string
 
@@ -28,9 +34,11 @@ func Execute() error {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&BucketName, "bucketname", "", "AWS region")
+	rootCmd.PersistentFlags().StringVar(&BucketName, "bucketname", "", "The name of the bucket")
 	rootCmd.MarkFlagRequired("bucketname")
 	rootCmd.PersistentFlags().StringVar(&Region, "region", defaultRegion, "AWS region")
+	rootCmd.PersistentFlags().BoolVar(&DryRun, "dry-run", false, "")
+	rootCmd.PersistentFlags().StringVar(&OutputFile, "output", "", "Stores results to the specified file")
 }
 
 // TODO figure out where to do autoregion
