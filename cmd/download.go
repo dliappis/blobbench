@@ -68,7 +68,7 @@ func (r *Results) Push(v MetricRecord) {
 	r.items = append(r.items, v)
 }
 
-const bufferSize uint64 = 1024 * 8 // 8 kilobytes
+var bufferSize uint64
 
 var (
 	basedir                string
@@ -99,7 +99,7 @@ func init() {
 	downloadCmd.Flags().StringVar(&suffixseparator, "suffixsep", "-", "The separator for suffix e.g. 0 for -0000.")
 
 	downloadCmd.Flags().IntVar(&numWorkers, "workers", 5, "Amount of parallel download workers")
-	downloadCmd.Flags().Uint64Var(&bufsize, "bufsize", 1024, "Buf size to use while download (per worker)")
+	downloadCmd.Flags().Uint64Var(&bufferSize, "bufsize", 8192, "Buf size to use while download (per worker)")
 }
 
 func initDownload(cmd *cobra.Command, args []string) {
