@@ -96,10 +96,10 @@ func init() {
 	downloadCmd.Flags().IntVar(&numFiles, "numfiles", 2, "How many files")
 	downloadCmd.MarkFlagRequired("numfiles")
 	downloadCmd.Flags().IntVar(&suffixdigits, "suffixdigits", 4, "suffix digits, should start from 0, e.g. 4 for -0000")
-	downloadCmd.Flags().StringVar(&suffixseparator, "suffixsep", "-", "The separator for suffix e.g. 0 for -0000.")
+	downloadCmd.Flags().StringVar(&suffixseparator, "suffixsep", "-", "The separator for suffix e.g. 0 for -0000")
 
 	downloadCmd.Flags().IntVar(&numWorkers, "workers", 5, "Amount of parallel download workers")
-	downloadCmd.Flags().Uint64Var(&bufferSize, "bufsize", 8192, "Buf size to use while download (per worker)")
+	downloadCmd.Flags().Uint64Var(&bufferSize, "bufsize", 8192, "Buffer size (in bytes) that each worker will use")
 }
 
 func initDownload(cmd *cobra.Command, args []string) {
@@ -145,9 +145,9 @@ func initDownload(cmd *cobra.Command, args []string) {
 func processFile(s3client *s3.Client, suffix int, results *Results) error {
 	if DryRun {
 		return processFileDryRun(suffix, results)
-	} else {
-		return processFileAWS(s3client, suffix, results)
 	}
+	return processFileAWS(s3client, suffix, results)
+
 }
 
 func processFileAWS(s3client *s3.Client, suffix int, results *Results) error {
@@ -253,12 +253,13 @@ func printResultsStdout(results *Results, duration time.Duration) {
 	color.Yellow("\nResults following\n")
 	color.Yellow(strings.Repeat("-", 90))
 
-	color.Green("Sample|File|TimeToFirstGet (ms)|TimeToLastGet (ms)|Size (MB)|Success|Err Code|Err Message")
+	color.Green(resultsHeader())
+	color.Green("\nSample|File|TimeToFirstGet (ms)|TimeToLastGet (ms)|Size (MB)|Success|Err Code|Err Message")
 	sort.Sort(ByIdx(results.Items()))
 	for _, v := range results.Items() {
 		color.Green("%d|%s|%.1f|%.1f|%.1f|%t|%s|%s", v.idx, v.file, float64(v.FirstGet/time.Millisecond), float64(v.LastGet/time.Millisecond), float64(v.size/1024), v.success, v.errDetails.code, v.errDetails.message)
 	}
-	color.Green("\nTotal execution time: %s", duration)
+	color.Green(summaryOfResults(results, duration))
 	fmt.Println()
 }
 
@@ -272,7 +273,10 @@ func printResultsFile(results *Results, duration time.Duration) {
 
 	w := bufio.NewWriter(f)
 
-	_, err = fmt.Fprintf(w, "Sample|File|TimeToFirstGet (ms)|TimeToLastGet (ms)|Size (MB)|Success|Err Code|Err Message\n")
+	_, err = fmt.Fprintf(w, resultsHeader())
+	checkWriteErr(err)
+
+	_, err = fmt.Fprintf(w, "\nSample|File|TimeToFirstGet (ms)|TimeToLastGet (ms)|Size (MB)|Success|Err Code|Err Message\n")
 	checkWriteErr(err)
 
 	for _, v := range results.Items() {
@@ -280,9 +284,28 @@ func printResultsFile(results *Results, duration time.Duration) {
 		checkWriteErr(err)
 	}
 
-	_, err = fmt.Fprintf(w, "\nTotal execution time: %s\n", duration)
+	_, err = fmt.Fprintf(w, summaryOfResults(results, duration))
 	checkWriteErr(err)
 	w.Flush()
+}
+
+func resultsHeader() string {
+	return fmt.Sprintf("\nNumber of files: [%d], Number of workers: [%d], Buffer size: [%d]\n", numFiles, numWorkers, bufferSize)
+}
+
+func summaryOfResults(results *Results, duration time.Duration) string {
+	var totalBytesDownloaded uint64
+	for _, v := range results.Items() {
+		totalBytesDownloaded += uint64(v.size)
+	}
+
+	thoughputMBps := float64(totalBytesDownloaded) / ((float64(duration) / float64(time.Millisecond)) * float64(1000))
+	sumLine := fmt.Sprintf(
+		"\nTotals:\n"+
+			"Execution Time (human)|Execution Time (ms)|Bytes Downloaded|GB Downloaded|Throughput (MB/s)|Throughput (Gbps)\n"+
+			"%s|%.1f|%d|%.1f|%.1f|%.1f", duration, float64(duration)/float64(time.Millisecond), totalBytesDownloaded, float64(totalBytesDownloaded)/float64(1024*1024*1024), thoughputMBps, float64(thoughputMBps)*8.0/1024.0)
+
+	return sumLine
 }
 
 func checkWriteErr(err error) {
