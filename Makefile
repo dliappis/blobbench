@@ -1,7 +1,11 @@
 BINDIR := "build"
 
-build:
+build: setup
 	gox -osarch="linux/amd64 darwin/amd64" -output="$(BINDIR)/{{.Dir}}_{{.OS}}_{{.Arch}}" ./
 
+setup:
+	go get github.com/mitchellh/gox
+
 .DEFAULT: build
-.PHONY: build
+
+.PHONY: build setup

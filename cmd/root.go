@@ -12,8 +12,8 @@ var Region string
 // BucketName ...
 var BucketName string
 
-// DryRun mocks all operations if true
-var DryRun bool
+// Provider ...
+var Provider string
 
 // OutputFile is the filename where results will be written
 var OutputFile string
@@ -37,7 +37,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&BucketName, "bucketname", "", "The name of the bucket")
 	rootCmd.MarkFlagRequired("bucketname")
 	rootCmd.PersistentFlags().StringVar(&Region, "region", defaultRegion, "AWS region")
-	rootCmd.PersistentFlags().BoolVar(&DryRun, "dry-run", false, "")
+	rootCmd.PersistentFlags().StringVar(&Provider, "provider", "dummy", "Specifies the provider (aws, gcp, azure, dummy)")
 	rootCmd.PersistentFlags().StringVar(&OutputFile, "output", "", "Stores results to the specified file")
 }
 

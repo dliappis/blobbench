@@ -4,69 +4,20 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io"
-	"math"
-	"math/rand"
 	"os"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/aws/awserr"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/dliappis/blobbench/internal"
-	"github.com/dliappis/blobbench/internal/pool"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+
+	"github.com/dliappis/blobbench/internal"
+	"github.com/dliappis/blobbench/internal/pool"
+	"github.com/dliappis/blobbench/internal/providers"
+	"github.com/dliappis/blobbench/internal/report"
 )
-
-// MetricRecord contains metric records for a specific invocation of processFile
-type MetricRecord struct {
-	idx        int
-	size       int
-	file       string
-	FirstGet   time.Duration
-	LastGet    time.Duration
-	success    bool
-	errDetails metricError
-}
-
-// metricError contains error records for a specific invocation of processFile
-type metricError struct {
-	code    string
-	message string
-}
-
-// ByIdx implements sort.Interface based on the idx field and lets us sort MetricRecord slices
-type ByIdx []MetricRecord
-
-func (item ByIdx) Len() int           { return len(item) }
-func (item ByIdx) Less(i, j int) bool { return item[i].idx < item[j].idx }
-func (item ByIdx) Swap(i, j int)      { item[i], item[j] = item[j], item[i] }
-
-// Results contains all metric records from executed processFile tasks
-type Results struct {
-	sync.Mutex
-	items []MetricRecord
-}
-
-// Items returns Results items.
-// It is safe to call it concurrently.
-func (r *Results) Items() []MetricRecord {
-	r.Lock()
-	defer r.Unlock()
-	return r.items
-}
-
-// Push adds an item into Results.
-// It is safe to call it concurrently.
-func (r *Results) Push(v MetricRecord) {
-	r.Lock()
-	defer r.Unlock()
-	r.items = append(r.items, v)
-}
 
 var bufferSize uint64
 
@@ -108,7 +59,7 @@ func initDownload(cmd *cobra.Command, args []string) {
 	color.Green(">>> Threadpool started")
 
 	pool, _ := pool.NewPool(pool.Config{NumWorkers: numWorkers})
-	results := &Results{}
+	results := &report.Results{}
 
 	for i := 0; i < numFiles; i++ {
 		ctx := context.Background()
@@ -142,106 +93,36 @@ func initDownload(cmd *cobra.Command, args []string) {
 	printResults(results, duration)
 }
 
-func processFile(s3client *s3.Client, suffix int, results *Results) error {
-	if DryRun {
-		return processFileDryRun(suffix, results)
-	}
-	return processFileAWS(s3client, suffix, results)
+func processFile(s3client *s3.Client, suffix int, results *report.Results) error {
+	path := fmt.Sprintf("%s/%s%s%0*d", basedir, prefix, suffixseparator, suffixdigits, suffix)
 
-}
-
-func processFileAWS(s3client *s3.Client, suffix int, results *Results) error {
-	key := fmt.Sprintf("%s/%s%s%0*d", basedir, prefix, suffixseparator, suffixdigits, suffix)
-	color.HiMagenta("DEBUG working on file [%s/%s]", BucketName, key)
-	var metricRecord MetricRecord
-	metricRecord.file = key
-	metricRecord.idx = suffix
-
-	stopwatch := time.Now()
-
-	req := s3client.GetObjectRequest(&s3.GetObjectInput{
-		Bucket: aws.String(BucketName),
-		Key:    aws.String(key),
-	})
-
-	resp, err := req.Send(context.Background())
-
-	if err != nil {
-		metricRecord.FirstGet = math.MaxInt64
-		metricRecord.LastGet = math.MaxInt64
-		metricRecord.size = -1
-		metricRecord.success = false
-		metricRecord.errDetails = processAWSError(err)
-		results.Push(metricRecord)
-		return err
-	}
-
-	firstGet := time.Now().Sub(stopwatch)
-
-	// create a buffer to copy the S3 object body to
-	var buf = make([]byte, bufferSize)
-	var size int
-	for {
-		n, err := resp.Body.Read(buf)
-
-		size += n
-
-		if err == io.EOF {
-			break
+	switch Provider {
+	case "dummy":
+		p := &providers.Dummy{
+			Results:    results,
+			FilePath:   path,
+			FileNumber: suffix,
+		}
+		return p.Process()
+	case "aws":
+		key := fmt.Sprintf("%s/%s%s%0*d", basedir, prefix, suffixseparator, suffixdigits, suffix)
+		p := &providers.S3{
+			S3Client:   s3client,
+			BufferSize: bufferSize,
+			Results:    results,
+			FilePath:   path,
+			FileNumber: suffix,
+			BucketName: BucketName,
+			Key:        key,
 		}
 
-		// if the streaming fails, exit
-		if err != nil {
-			metricRecord.FirstGet = firstGet
-			metricRecord.LastGet = -1
-			metricRecord.size = size
-			metricRecord.success = false
-			metricRecord.errDetails = processAWSError(err)
-			results.Push(metricRecord)
-			return err
-		}
+		return p.Process()
 	}
-
-	_ = resp.Body.Close()
-
-	lastGet := time.Now().Sub(stopwatch)
-
-	results.Push(MetricRecord{FirstGet: firstGet, LastGet: lastGet, idx: suffix, file: fmt.Sprintf("%s", key), size: size, success: true})
-	return nil
+	return fmt.Errorf("Unknown provider %s", Provider)
 }
 
-func processFileDryRun(suffix int, results *Results) error {
-	key := fmt.Sprintf("%s/%s%s%0*d", basedir, prefix, suffixseparator, suffixdigits, suffix)
-	color.HiMagenta("DEBUG working on file [%s/%s]", BucketName, key)
-	var metricRecord MetricRecord
-	metricRecord.file = key
-	metricRecord.idx = suffix
-
-	stopwatch := time.Now()
-
-	// wait up to 500ms
-	time.Sleep(time.Millisecond * time.Duration(rand.Float32()*500))
-
-	firstGet := time.Now().Sub(stopwatch)
-
-	time.Sleep(time.Millisecond * time.Duration(rand.Float32()*500))
-
-	lastGet := time.Now().Sub(stopwatch)
-
-	results.Push(MetricRecord{FirstGet: firstGet, LastGet: lastGet, idx: suffix, file: fmt.Sprintf("%s", key), size: rand.Intn(1024 * 1024 * 1024), success: true})
-	return nil
-}
-
-func processAWSError(err error) metricError {
-	// https://docs.aws.amazon.com/sdk-for-go/v1/developer-guide/handling-errors.html
-	if aerr, ok := err.(awserr.Error); ok {
-		return metricError{code: aerr.Code(), message: aerr.Message()}
-	}
-	return metricError{}
-}
-
-func printResults(results *Results, duration time.Duration) {
-	sort.Sort(ByIdx(results.Items()))
+func printResults(results *report.Results, duration time.Duration) {
+	sort.Sort(report.ByIdx(results.Items()))
 	if OutputFile == "" {
 		printResultsStdout(results, duration)
 	} else {
@@ -249,21 +130,21 @@ func printResults(results *Results, duration time.Duration) {
 	}
 }
 
-func printResultsStdout(results *Results, duration time.Duration) {
+func printResultsStdout(results *report.Results, duration time.Duration) {
 	color.Yellow("\nResults following\n")
 	color.Yellow(strings.Repeat("-", 90))
 
 	color.Green(resultsHeader())
 	color.Green("\nSample|File|TimeToFirstGet (ms)|TimeToLastGet (ms)|Size (MB)|Success|Err Code|Err Message")
-	sort.Sort(ByIdx(results.Items()))
+	sort.Sort(report.ByIdx(results.Items()))
 	for _, v := range results.Items() {
-		color.Green("%d|%s|%.1f|%.1f|%.1f|%t|%s|%s", v.idx, v.file, float64(v.FirstGet/time.Millisecond), float64(v.LastGet/time.Millisecond), float64(v.size/1024), v.success, v.errDetails.code, v.errDetails.message)
+		color.Green("%d|%s|%.1f|%.1f|%.1f|%t|%s|%s", v.Idx, v.File, float64(v.FirstGet/time.Millisecond), float64(v.LastGet/time.Millisecond), float64(v.Size/1024), v.Success, v.ErrDetails.Code, v.ErrDetails.Message)
 	}
 	color.Green(summaryOfResults(results, duration))
 	fmt.Println()
 }
 
-func printResultsFile(results *Results, duration time.Duration) {
+func printResultsFile(results *report.Results, duration time.Duration) {
 	f, err := os.Create(OutputFile)
 	if err != nil {
 		color.Red("Unable to write to [%s], err [%s]. Printing to stdout instead.", OutputFile, err)
@@ -280,7 +161,7 @@ func printResultsFile(results *Results, duration time.Duration) {
 	checkWriteErr(err)
 
 	for _, v := range results.Items() {
-		_, err = fmt.Fprintf(w, "%d|%s|%.1f|%.1f|%.1f|%t|%s|%s\n", v.idx, v.file, float64(v.FirstGet/time.Millisecond), float64(v.LastGet/time.Millisecond), float64(v.size/1024), v.success, v.errDetails.code, v.errDetails.message)
+		_, err = fmt.Fprintf(w, "%d|%s|%.1f|%.1f|%.1f|%t|%s|%s\n", v.Idx, v.File, float64(v.FirstGet/time.Millisecond), float64(v.LastGet/time.Millisecond), float64(v.Size/1024), v.Success, v.ErrDetails.Code, v.ErrDetails.Message)
 		checkWriteErr(err)
 	}
 
@@ -293,10 +174,10 @@ func resultsHeader() string {
 	return fmt.Sprintf("\nNumber of files: [%d], Number of workers: [%d], Buffer size: [%d]\n", numFiles, numWorkers, bufferSize)
 }
 
-func summaryOfResults(results *Results, duration time.Duration) string {
+func summaryOfResults(results *report.Results, duration time.Duration) string {
 	var totalBytesDownloaded uint64
 	for _, v := range results.Items() {
-		totalBytesDownloaded += uint64(v.size)
+		totalBytesDownloaded += uint64(v.Size)
 	}
 
 	thoughputMBps := float64(totalBytesDownloaded) / ((float64(duration) / float64(time.Millisecond)) * float64(1000))
