@@ -18,7 +18,7 @@ Just clone this repo and run `make`.
 
 It will generate the following binaries:
 
-```
+``` shell
 build
 ├── blobbench_darwin_amd64
 └── blobbench_linux_amd64
@@ -45,7 +45,7 @@ There are more parameters supported by the download subcommand, see below sectio
 
 ## Download command
 
-The download command streams (using the AWS [GetObject](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html) API) and calculates the achived throughput per file; it doesn't *actually* use any File IO to write to the filesystem as the intention is to benchmark the performance of the blobstore and not of the local filesystem.
+The download command streams (using the AWS [GetObject](https://docs.aws.amazon.com/AmazonS3/latest/API/API) *actually* use any File IO to write to the filesystem as the intention is to benchmark the performance of the blobstore and not of the local filesystem.
 
 The number of files can be specified with `--numfiles` and need to use a suffix starting with `0`. The actual number of decimal digits is configurable using `--suffixdigits`. For files like `testfile-000`, `testfile-001`, ... you need to use `--suffixdigits 3`.
 

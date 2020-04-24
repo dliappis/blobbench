@@ -47,7 +47,7 @@ func (p *S3) Process() error {
 		metricRecord.LastGet = math.MaxInt64
 		metricRecord.Size = -1
 		metricRecord.Success = false
-		metricRecord.ErrDetails = processAWSError(err)
+		metricRecord.ErrDetails = p.processAWSError(err)
 		p.Results.Push(metricRecord)
 		return err
 	}
