@@ -8,7 +8,7 @@ import (
 // MetricRecord contains metric records for a specific invocation of processFile
 type MetricRecord struct {
 	Idx        int
-	Size       int
+	Size       int // TODO change this to int64
 	File       string
 	FirstGet   time.Duration
 	LastGet    time.Duration

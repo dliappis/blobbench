@@ -55,7 +55,6 @@ func init() {
 
 func initDownload(cmd *cobra.Command, args []string) {
 	startTime := time.Now()
-	s3client := s3.New(internal.SetupS3Client(Region))
 	color.Green(">>> Threadpool started")
 
 	pool, _ := pool.NewPool(pool.Config{NumWorkers: numWorkers})
@@ -69,7 +68,7 @@ func initDownload(cmd *cobra.Command, args []string) {
 
 		task = func() {
 			// ----- TaskFunc definition -------------------------------
-			err = processFile(s3client, suffix, results)
+			err = processFile(suffix, results)
 			// ---------------------------------------------------------
 
 			if err != nil {
@@ -93,7 +92,7 @@ func initDownload(cmd *cobra.Command, args []string) {
 	printResults(results, duration)
 }
 
-func processFile(s3client *s3.Client, suffix int, results *report.Results) error {
+func processFile(suffix int, results *report.Results) error {
 	path := fmt.Sprintf("%s/%s%s%0*d", basedir, prefix, suffixseparator, suffixdigits, suffix)
 
 	switch Provider {
@@ -107,7 +106,7 @@ func processFile(s3client *s3.Client, suffix int, results *report.Results) error
 	case "aws":
 		key := fmt.Sprintf("%s/%s%s%0*d", basedir, prefix, suffixseparator, suffixdigits, suffix)
 		p := &providers.S3{
-			S3Client:   s3client,
+			S3Client:   s3.New(internal.SetupS3Client(Region)),
 			BufferSize: bufferSize,
 			Results:    results,
 			FilePath:   path,
