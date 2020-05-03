@@ -114,7 +114,18 @@ func processFile(suffix int, results *report.Results) error {
 			BucketName: BucketName,
 			Key:        key,
 		}
-
+		return p.Process()
+	case "gcp":
+		key := fmt.Sprintf("%s/%s%s%0*d", basedir, prefix, suffixseparator, suffixdigits, suffix)
+		p := &providers.GCS{
+			GCSClient:  internal.SetupGCSClient(),
+			BufferSize: bufferSize,
+			Results:    results,
+			FilePath:   path,
+			FileNumber: suffix,
+			BucketName: BucketName,
+			Key:        key,
+		}
 		return p.Process()
 	}
 	return fmt.Errorf("Unknown provider %s", Provider)

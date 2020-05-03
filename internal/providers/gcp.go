@@ -2,7 +2,6 @@ package providers
 
 import (
 	"io"
-	"io/ioutil"
 	"math"
 	"time"
 
@@ -33,13 +32,9 @@ func (p *GCS) Process() error {
 	metricRecord.File = p.FilePath
 	metricRecord.Idx = p.FileNumber
 
-	bucket := p.GCSClient.Bucket(p.BucketName)
-	obj := bucket.Object(p.Key)
 	ctx := context.Background()
-
 	stopwatch := time.Now()
-
-	reader, err := obj.NewReader(ctx)
+	reader, err := p.GCSClient.Bucket(p.BucketName).Object(p.Key).NewReader(ctx)
 
 	if err != nil {
 		metricRecord.FirstGet = math.MaxInt64
@@ -59,8 +54,9 @@ func (p *GCS) Process() error {
 	var size int
 
 	for {
-		n, err := io.CopyBuffer(ioutil.Discard, reader, buf)
-		size += int(n)
+		// TODO consider is we should instead read with io.Copy as shown in https://godoc.org/cloud.google.com/go/storage
+		n, err := reader.Read(buf)
+		size += n
 
 		if err == io.EOF {
 			break
