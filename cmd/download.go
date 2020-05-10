@@ -68,7 +68,7 @@ func initDownload(cmd *cobra.Command, args []string) {
 
 		task = func() {
 			// ----- TaskFunc definition -------------------------------
-			err = processFile(suffix, results)
+			err = processDownload(suffix, results)
 			// ---------------------------------------------------------
 
 			if err != nil {
@@ -92,7 +92,7 @@ func initDownload(cmd *cobra.Command, args []string) {
 	printResults(results, duration)
 }
 
-func processFile(suffix int, results *report.Results) error {
+func processDownload(suffix int, results *report.Results) error {
 	path := fmt.Sprintf("%s/%s%s%0*d", basedir, prefix, suffixseparator, suffixdigits, suffix)
 
 	switch Provider {
@@ -102,7 +102,7 @@ func processFile(suffix int, results *report.Results) error {
 			FilePath:   path,
 			FileNumber: suffix,
 		}
-		return p.Process()
+		return p.Download()
 	case "aws":
 		key := fmt.Sprintf("%s/%s%s%0*d", basedir, prefix, suffixseparator, suffixdigits, suffix)
 		p := &providers.S3{
@@ -114,7 +114,7 @@ func processFile(suffix int, results *report.Results) error {
 			BucketName: BucketName,
 			Key:        key,
 		}
-		return p.Process()
+		return p.Download()
 	case "gcp":
 		key := fmt.Sprintf("%s/%s%s%0*d", basedir, prefix, suffixseparator, suffixdigits, suffix)
 		p := &providers.GCS{
@@ -126,7 +126,7 @@ func processFile(suffix int, results *report.Results) error {
 			BucketName: BucketName,
 			Key:        key,
 		}
-		return p.Process()
+		return p.Download()
 	}
 	return fmt.Errorf("Unknown provider %s", Provider)
 }

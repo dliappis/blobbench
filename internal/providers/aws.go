@@ -2,13 +2,17 @@ package providers
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"math"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/awserr"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/s3manager"
 	"github.com/fatih/color"
 
 	"github.com/dliappis/blobbench/internal/report"
@@ -22,12 +26,43 @@ type S3 struct {
 	FilePath   string
 	FileNumber int
 	Key        string
-
-	Results *report.Results
+	// Used only for uploads
+	LocalDirName  string
+	LocalFileName string
+	PartSize      int64
+	Results       *report.Results
 }
 
-// Process ...
-func (p *S3) Process() error {
+// Upload copies a file to an S3 Bucket.
+// Path to the local file and S3 destination object are defined in p.
+func (p *S3) Upload() error {
+	color.HiMagenta("DEBUG working on file [%s]", p.FilePath)
+	uploader := s3manager.NewUploader(p.S3Client.Config)
+
+	f, err := os.Open(filepath.Join(p.LocalDirName, p.LocalFileName))
+	if err != nil {
+		fmt.Println(fmt.Errorf("Failed to open file %q, %v", p.LocalFileName, err))
+	}
+	defer f.Close()
+
+	// Upload the file to S3!
+	result, err := uploader.Upload(&s3manager.UploadInput{
+		Bucket: aws.String(p.BucketName),
+		Key:    aws.String(p.Key),
+		Body:   f,
+	}, func(u *s3manager.Uploader) {
+		u.PartSize = p.PartSize
+	})
+	if err != nil {
+		fmt.Println(fmt.Errorf("failed to upload file, %v", err))
+	}
+
+	fmt.Printf("file uploaded to [%s]\n", aws.StringValue(&result.Location))
+	return nil
+}
+
+// Download ...
+func (p *S3) Download() error {
 	color.HiMagenta("DEBUG working on file [%s]", p.FilePath)
 	var metricRecord report.MetricRecord
 	metricRecord.File = p.FilePath

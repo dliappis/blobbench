@@ -3,6 +3,8 @@ package providers
 import (
 	"io"
 	"math"
+	"os"
+	"path/filepath"
 	"time"
 
 	"cloud.google.com/go/storage"
@@ -15,18 +17,41 @@ import (
 
 // GCS ...
 type GCS struct {
-	GCSClient  *storage.Client
-	BufferSize uint64
-	BucketName string
-	FilePath   string
-	FileNumber int
-	Key        string
-
-	Results *report.Results
+	GCSClient     *storage.Client
+	BufferSize    uint64
+	BucketName    string
+	FilePath      string
+	FileNumber    int
+	Key           string
+	LocalDirName  string
+	LocalFileName string
+	Results       *report.Results
 }
 
-// Process ...
-func (p *GCS) Process() error {
+// Upload copies a file to a GCS Bucket.
+// Path to the local file and GCS destination object are defined in p.
+func (p *GCS) Upload() error {
+	color.HiMagenta("DEBUG working on file [%s]", p.FilePath)
+
+	ctx := context.Background()
+	f, err := os.Open(filepath.Join(p.LocalDirName, p.LocalFileName))
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	wc := p.GCSClient.Bucket(p.BucketName).Object(p.Key).NewWriter(ctx)
+	if _, err = io.Copy(wc, f); err != nil {
+		return err
+	}
+	if err := wc.Close(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Download ...
+func (p *GCS) Download() error {
 	color.HiMagenta("DEBUG working on file [%s]", p.FilePath)
 	var metricRecord report.MetricRecord
 	metricRecord.File = p.FilePath
