@@ -167,11 +167,11 @@ func printResultsFile(results *report.Results, duration time.Duration) {
 	_, err = fmt.Fprintf(w, resultsHeader())
 	checkWriteErr(err)
 
-	_, err = fmt.Fprintf(w, "\nSample|File|TimeToFirstGet (ms)|TimeToLastGet (ms)|Size (MB)|Success|Err Code|Err Message\n")
+	_, err = fmt.Fprintf(w, "\nSample|File|TimeToFirstGet (ms)|TimeToLastGet (ms)|Size (MB)|Throughput (MB/s)|Throughput (Mbps)|Success|Err Code|Err Message\n")
 	checkWriteErr(err)
 
 	for _, v := range results.Items() {
-		_, err = fmt.Fprintf(w, "%d|%s|%.1f|%.1f|%.1f|%t|%s|%s\n", v.Idx, v.File, float64(v.FirstGet/time.Millisecond), float64(v.LastGet/time.Millisecond), float64(v.Size/1024), v.Success, v.ErrDetails.Code, v.ErrDetails.Message)
+		_, err = fmt.Fprintf(w, "%d|%s|%.1f|%.1f|%.1f|%.1f|%.1f|%t|%s|%s\n", v.Idx, v.File, float64(v.FirstGet/time.Millisecond), float64(v.LastGet/time.Millisecond), float64(v.Size/1024/1024), float64(v.Size*1000/1024/1024)/float64(v.LastGet/time.Millisecond), float64(v.Size*8*1000/1024/1024)/float64(v.LastGet/time.Millisecond), v.Success, v.ErrDetails.Code, v.ErrDetails.Message)
 		checkWriteErr(err)
 	}
 
@@ -193,8 +193,8 @@ func summaryOfResults(results *report.Results, duration time.Duration) string {
 	thoughputMBps := float64(totalBytesDownloaded) / ((float64(duration) / float64(time.Millisecond)) * float64(1000))
 	sumLine := fmt.Sprintf(
 		"\nTotals:\n"+
-			"Execution Time (human)|Execution Time (ms)|Bytes Downloaded|GB Downloaded|Throughput (MB/s)|Throughput (Gbps)\n"+
-			"%s|%.1f|%d|%.1f|%.1f|%.1f", duration, float64(duration)/float64(time.Millisecond), totalBytesDownloaded, float64(totalBytesDownloaded)/float64(1024*1024*1024), thoughputMBps, float64(thoughputMBps)*8.0/1024.0)
+			"Execution Time (human)|Execution Time (ms)|Bytes Downloaded|GB Downloaded|Throughput (MB/s)|Throughput (Gbps)|Workers|Number of Files|BufferSize (B)\n"+
+			"%s|%.1f|%d|%.1f|%.1f|%.1f|%d|%d|%d", duration, float64(duration)/float64(time.Millisecond), totalBytesDownloaded, float64(totalBytesDownloaded)/float64(1024*1024*1024), thoughputMBps, float64(thoughputMBps)*8.0/1024.0, numWorkers, numFiles, bufferSize)
 
 	return sumLine
 }
