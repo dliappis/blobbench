@@ -55,7 +55,6 @@ func init() {
 
 func initDownload(cmd *cobra.Command, args []string) {
 	startTime := time.Now()
-	s3client := s3.New(internal.SetupS3Client(Region))
 	color.Green(">>> Threadpool started")
 
 	pool, _ := pool.NewPool(pool.Config{NumWorkers: numWorkers})
@@ -69,7 +68,7 @@ func initDownload(cmd *cobra.Command, args []string) {
 
 		task = func() {
 			// ----- TaskFunc definition -------------------------------
-			err = processFile(s3client, suffix, results)
+			err = processDownload(suffix, results)
 			// ---------------------------------------------------------
 
 			if err != nil {
@@ -93,7 +92,7 @@ func initDownload(cmd *cobra.Command, args []string) {
 	printResults(results, duration)
 }
 
-func processFile(s3client *s3.Client, suffix int, results *report.Results) error {
+func processDownload(suffix int, results *report.Results) error {
 	path := fmt.Sprintf("%s/%s%s%0*d", basedir, prefix, suffixseparator, suffixdigits, suffix)
 
 	switch Provider {
@@ -103,11 +102,11 @@ func processFile(s3client *s3.Client, suffix int, results *report.Results) error
 			FilePath:   path,
 			FileNumber: suffix,
 		}
-		return p.Process()
+		return p.Download()
 	case "aws":
 		key := fmt.Sprintf("%s/%s%s%0*d", basedir, prefix, suffixseparator, suffixdigits, suffix)
 		p := &providers.S3{
-			S3Client:   s3client,
+			S3Client:   s3.New(internal.SetupS3Client(Region)),
 			BufferSize: bufferSize,
 			Results:    results,
 			FilePath:   path,
@@ -115,8 +114,19 @@ func processFile(s3client *s3.Client, suffix int, results *report.Results) error
 			BucketName: BucketName,
 			Key:        key,
 		}
-
-		return p.Process()
+		return p.Download()
+	case "gcp":
+		key := fmt.Sprintf("%s/%s%s%0*d", basedir, prefix, suffixseparator, suffixdigits, suffix)
+		p := &providers.GCS{
+			GCSClient:  internal.SetupGCSClient(),
+			BufferSize: bufferSize,
+			Results:    results,
+			FilePath:   path,
+			FileNumber: suffix,
+			BucketName: BucketName,
+			Key:        key,
+		}
+		return p.Download()
 	}
 	return fmt.Errorf("Unknown provider %s", Provider)
 }
@@ -157,11 +167,11 @@ func printResultsFile(results *report.Results, duration time.Duration) {
 	_, err = fmt.Fprintf(w, resultsHeader())
 	checkWriteErr(err)
 
-	_, err = fmt.Fprintf(w, "\nSample|File|TimeToFirstGet (ms)|TimeToLastGet (ms)|Size (MB)|Success|Err Code|Err Message\n")
+	_, err = fmt.Fprintf(w, "\nSample|File|TimeToFirstGet (ms)|TimeToLastGet (ms)|Size (MB)|Throughput (MB/s)|Throughput (Mbps)|Success|Err Code|Err Message\n")
 	checkWriteErr(err)
 
 	for _, v := range results.Items() {
-		_, err = fmt.Fprintf(w, "%d|%s|%.1f|%.1f|%.1f|%t|%s|%s\n", v.Idx, v.File, float64(v.FirstGet/time.Millisecond), float64(v.LastGet/time.Millisecond), float64(v.Size/1024), v.Success, v.ErrDetails.Code, v.ErrDetails.Message)
+		_, err = fmt.Fprintf(w, "%d|%s|%.1f|%.1f|%.1f|%.1f|%.1f|%t|%s|%s\n", v.Idx, v.File, float64(v.FirstGet/time.Millisecond), float64(v.LastGet/time.Millisecond), float64(v.Size/1024/1024), float64(v.Size*1000/1024/1024)/float64(v.LastGet/time.Millisecond), float64(v.Size*8*1000/1024/1024)/float64(v.LastGet/time.Millisecond), v.Success, v.ErrDetails.Code, v.ErrDetails.Message)
 		checkWriteErr(err)
 	}
 
@@ -183,8 +193,8 @@ func summaryOfResults(results *report.Results, duration time.Duration) string {
 	thoughputMBps := float64(totalBytesDownloaded) / ((float64(duration) / float64(time.Millisecond)) * float64(1000))
 	sumLine := fmt.Sprintf(
 		"\nTotals:\n"+
-			"Execution Time (human)|Execution Time (ms)|Bytes Downloaded|GB Downloaded|Throughput (MB/s)|Throughput (Gbps)\n"+
-			"%s|%.1f|%d|%.1f|%.1f|%.1f", duration, float64(duration)/float64(time.Millisecond), totalBytesDownloaded, float64(totalBytesDownloaded)/float64(1024*1024*1024), thoughputMBps, float64(thoughputMBps)*8.0/1024.0)
+			"Execution Time (human)|Execution Time (ms)|Bytes Downloaded|GB Downloaded|Throughput (MB/s)|Throughput (Gbps)|Workers|Number of Files|BufferSize (B)\n"+
+			"%s|%.1f|%d|%.1f|%.1f|%.1f|%d|%d|%d", duration, float64(duration)/float64(time.Millisecond), totalBytesDownloaded, float64(totalBytesDownloaded)/float64(1024*1024*1024), thoughputMBps, float64(thoughputMBps)*8.0/1024.0, numWorkers, numFiles, bufferSize)
 
 	return sumLine
 }
