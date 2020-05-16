@@ -145,10 +145,10 @@ func printResultsStdout(results *report.Results, duration time.Duration) {
 	color.Yellow(strings.Repeat("-", 90))
 
 	color.Green(resultsHeader())
-	color.Green("\nSample|File|TimeToFirstGet (ms)|TimeToLastGet (ms)|Size (MB)|Success|Err Code|Err Message")
+	color.Green("\nSample|File|Duration (ms)|Size (MB)|Success|Err Code|Err Message")
 	sort.Sort(report.ByIdx(results.Items()))
 	for _, v := range results.Items() {
-		color.Green("%d|%s|%.1f|%.1f|%.1f|%t|%s|%s", v.Idx, v.File, float64(v.FirstGet/time.Millisecond), float64(v.LastGet/time.Millisecond), float64(v.Size/1024), v.Success, v.ErrDetails.Code, v.ErrDetails.Message)
+		color.Green("%d|%s|%.1f|%.1f|%t|%s|%s", v.Idx, v.File, float64(v.Duration/time.Millisecond), float64(v.Size/1024), v.Success, v.ErrDetails.Code, v.ErrDetails.Message)
 	}
 	color.Green(summaryOfResults(results, duration))
 	fmt.Println()
@@ -167,11 +167,11 @@ func printResultsFile(results *report.Results, duration time.Duration) {
 	_, err = fmt.Fprintf(w, resultsHeader())
 	checkWriteErr(err)
 
-	_, err = fmt.Fprintf(w, "\nSample|File|TimeToFirstGet (ms)|TimeToLastGet (ms)|Size (MB)|Throughput (MB/s)|Throughput (Mbps)|Success|Err Code|Err Message\n")
+	_, err = fmt.Fprintf(w, "\nSample|File|Duration (ms)|Size (MB)|Throughput (MB/s)|Throughput (Mbps)|Success|Err Code|Err Message\n")
 	checkWriteErr(err)
 
 	for _, v := range results.Items() {
-		_, err = fmt.Fprintf(w, "%d|%s|%.1f|%.1f|%.1f|%.1f|%.1f|%t|%s|%s\n", v.Idx, v.File, float64(v.FirstGet/time.Millisecond), float64(v.LastGet/time.Millisecond), float64(v.Size/1024/1024), float64(v.Size*1000/1024/1024)/float64(v.LastGet/time.Millisecond), float64(v.Size*8*1000/1024/1024)/float64(v.LastGet/time.Millisecond), v.Success, v.ErrDetails.Code, v.ErrDetails.Message)
+		_, err = fmt.Fprintf(w, "%d|%s|%.1f|%.1f|%.1f|%.1f|%t|%s|%s\n", v.Idx, v.File, float64(v.Duration/time.Millisecond), float64(v.Size/1024/1024), float64(v.Size*1000/1024/1024)/float64(v.Duration/time.Millisecond), float64(v.Size*8*1000/1024/1024)/float64(v.Duration/time.Millisecond), v.Success, v.ErrDetails.Code, v.ErrDetails.Message)
 		checkWriteErr(err)
 	}
 

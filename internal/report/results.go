@@ -10,8 +10,7 @@ type MetricRecord struct {
 	Idx        int
 	Size       int // TODO change this to int64
 	File       string
-	FirstGet   time.Duration
-	LastGet    time.Duration
+	Duration   time.Duration
 	Success    bool
 	ErrDetails MetricError
 }

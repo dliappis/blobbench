@@ -21,6 +21,15 @@ type Dummy struct {
 	FileNumber    int
 }
 
+// SleepingReader ...
+type SleepingReader struct{}
+
+func (r *SleepingReader) Read(p []byte) (int, error) {
+	// wait up to 500ms
+	time.Sleep(time.Millisecond * time.Duration(rand.Float32()*500))
+	return 0, nil
+}
+
 // Upload simulates upload of a file to a Blob store.
 // Local path is defined in p.
 func (p *Dummy) Upload() error {
@@ -40,27 +49,32 @@ func (p *Dummy) Upload() error {
 // Download ...
 func (p *Dummy) Download() error {
 	color.HiMagenta("DEBUG working on file [%s]", p.FilePath)
-	var metricRecord report.MetricRecord
-	metricRecord.File = p.FilePath
-	metricRecord.Idx = p.FileNumber
+	var err error
+	m := report.MetricRecord{
+		File: p.FilePath,
+		Idx:  p.FileNumber,
+	}
 
-	stopwatch := time.Now()
+	mr := MeasuringReader{
+		Metric:       m,
+		BufferSize:   0,
+		Results:      p.Results,
+		ProcessError: p.processError,
+		Start:        time.Now(),
+	}
 
-	// wait up to 500ms
-	time.Sleep(time.Millisecond * time.Duration(rand.Float32()*500))
+	_, err = mr.ReadFrom(&SleepingReader{})
+	if err != nil {
+		return err
+	}
 
-	firstGet := time.Now().Sub(stopwatch)
-
-	time.Sleep(time.Millisecond * time.Duration(rand.Float32()*500))
-
-	lastGet := time.Now().Sub(stopwatch)
-
-	p.Results.Push(report.MetricRecord{
-		FirstGet: firstGet,
-		LastGet:  lastGet,
-		Idx:      p.FileNumber,
-		File:     p.FilePath,
-		Size:     rand.Intn(1024 * 1024 * 1024),
-		Success:  true})
 	return nil
+}
+
+func (p *Dummy) processError(err error) report.MetricError {
+	if err != nil {
+		rand.Seed(time.Now().UnixNano())
+		return report.MetricError{Code: string(rand.Intn(500) + 1), Message: "Dummy provider error"}
+	}
+	return report.MetricError{}
 }

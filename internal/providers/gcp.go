@@ -2,7 +2,6 @@ package providers
 
 import (
 	"io"
-	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -53,69 +52,38 @@ func (p *GCS) Upload() error {
 // Download ...
 func (p *GCS) Download() error {
 	color.HiMagenta("DEBUG working on file [%s]", p.FilePath)
-	var metricRecord report.MetricRecord
-	metricRecord.File = p.FilePath
-	metricRecord.Idx = p.FileNumber
+	m := report.MetricRecord{
+		File: p.FilePath,
+		Idx:  p.FileNumber,
+	}
+
+	mr := MeasuringReader{
+		Metric:       m,
+		BufferSize:   p.BufferSize,
+		Results:      p.Results,
+		ProcessError: p.processError,
+		Start:        time.Now(),
+	}
 
 	ctx := context.Background()
-	stopwatch := time.Now()
 	reader, err := p.GCSClient.Bucket(p.BucketName).Object(p.Key).NewReader(ctx)
-
 	if err != nil {
-		metricRecord.FirstGet = math.MaxInt64
-		metricRecord.LastGet = math.MaxInt64
-		metricRecord.Size = -1
-		metricRecord.Success = false
-		metricRecord.ErrDetails = p.processGCSError(err)
-		p.Results.Push(metricRecord)
 		return err
 	}
 
-	// TODO rename, the term firstGET is S3 specific
-	firstGet := time.Now().Sub(stopwatch)
-
-	// create a buffer to copy the GCS object body to
-	var buf = make([]byte, p.BufferSize)
-	var size int
-
-	for {
-		// TODO consider is we should instead read with io.Copy as shown in https://godoc.org/cloud.google.com/go/storage
-		n, err := reader.Read(buf)
-		size += n
-
-		if err == io.EOF {
-			break
-		}
-
-		// if the streaming fails, exit
-		if err != nil {
-			metricRecord.FirstGet = firstGet
-			metricRecord.LastGet = -1
-			metricRecord.Size = size
-			metricRecord.Success = false
-			metricRecord.ErrDetails = p.processGCSError(err)
-			p.Results.Push(metricRecord)
-			return err
-		}
+	_, err = mr.ReadFrom(reader)
+	if err != nil {
+		return err
 	}
 
-	_ = reader.Close()
-
-	lastGet := time.Now().Sub(stopwatch)
-
-	p.Results.Push(report.MetricRecord{
-		FirstGet: firstGet,
-		LastGet:  lastGet,
-		Idx:      p.FileNumber,
-		File:     p.Key,
-		Size:     size,
-		Success:  true,
-	})
+	err = reader.Close()
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
-func (p *GCS) processGCSError(err error) report.MetricError {
-	// https://docs.aws.amazon.com/sdk-for-go/v1/developer-guide/handling-errors.html
+func (p *GCS) processError(err error) report.MetricError {
 	if err, ok := err.(*googleapi.Error); ok {
 		return report.MetricError{Code: string(err.Code), Message: err.Body}
 	}

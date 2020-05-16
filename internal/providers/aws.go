@@ -3,8 +3,6 @@ package providers
 import (
 	"context"
 	"fmt"
-	"io"
-	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -64,11 +62,18 @@ func (p *S3) Upload() error {
 // Download ...
 func (p *S3) Download() error {
 	color.HiMagenta("DEBUG working on file [%s]", p.FilePath)
-	var metricRecord report.MetricRecord
-	metricRecord.File = p.FilePath
-	metricRecord.Idx = p.FileNumber
+	m := report.MetricRecord{
+		File: p.FilePath,
+		Idx:  p.FileNumber,
+	}
 
-	stopwatch := time.Now()
+	mr := MeasuringReader{
+		Metric:       m,
+		BufferSize:   p.BufferSize,
+		Results:      p.Results,
+		ProcessError: p.processError,
+		Start:        time.Now(),
+	}
 
 	req := p.S3Client.GetObjectRequest(&s3.GetObjectInput{
 		Bucket: aws.String(p.BucketName),
@@ -76,59 +81,24 @@ func (p *S3) Download() error {
 	})
 
 	resp, err := req.Send(context.Background())
-
 	if err != nil {
-		metricRecord.FirstGet = math.MaxInt64
-		metricRecord.LastGet = math.MaxInt64
-		metricRecord.Size = -1
-		metricRecord.Success = false
-		metricRecord.ErrDetails = p.processAWSError(err)
-		p.Results.Push(metricRecord)
 		return err
 	}
 
-	firstGet := time.Now().Sub(stopwatch)
-
-	// create a buffer to copy the S3 object body to
-	var buf = make([]byte, p.BufferSize)
-	var size int
-	for {
-		n, err := resp.Body.Read(buf)
-
-		size += n
-
-		if err == io.EOF {
-			break
-		}
-
-		// if the streaming fails, exit
-		if err != nil {
-			metricRecord.FirstGet = firstGet
-			metricRecord.LastGet = -1
-			metricRecord.Size = size
-			metricRecord.Success = false
-			metricRecord.ErrDetails = p.processAWSError(err)
-			p.Results.Push(metricRecord)
-			return err
-		}
+	_, err = mr.ReadFrom(resp.Body)
+	if err != nil {
+		return err
 	}
 
-	_ = resp.Body.Close()
+	err = resp.Body.Close()
+	if err != nil {
+		return err
+	}
 
-	lastGet := time.Now().Sub(stopwatch)
-
-	p.Results.Push(report.MetricRecord{
-		FirstGet: firstGet,
-		LastGet:  lastGet,
-		Idx:      p.FileNumber,
-		File:     p.Key,
-		Size:     size,
-		Success:  true,
-	})
 	return nil
 }
 
-func (p *S3) processAWSError(err error) report.MetricError {
+func (p *S3) processError(err error) report.MetricError {
 	// https://docs.aws.amazon.com/sdk-for-go/v1/developer-guide/handling-errors.html
 	if err, ok := err.(awserr.Error); ok {
 		return report.MetricError{Code: err.Code(), Message: err.Message()}
