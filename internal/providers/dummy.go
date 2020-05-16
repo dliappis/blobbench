@@ -2,6 +2,7 @@ package providers
 
 import (
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -27,7 +28,7 @@ type SleepingReader struct{}
 func (r *SleepingReader) Read(p []byte) (int, error) {
 	// wait up to 500ms
 	time.Sleep(time.Millisecond * time.Duration(rand.Float32()*500))
-	return 0, nil
+	return 0, io.EOF
 }
 
 // Upload simulates upload of a file to a Blob store.
