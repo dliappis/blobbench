@@ -21,7 +21,6 @@ type GCS struct {
 	BucketName    string
 	FilePath      string
 	FileNumber    int
-	Key           string
 	LocalDirName  string
 	LocalFileName string
 	Results       *report.Results
@@ -39,7 +38,7 @@ func (p *GCS) Upload() error {
 	}
 	defer f.Close()
 
-	wc := p.GCSClient.Bucket(p.BucketName).Object(p.Key).NewWriter(ctx)
+	wc := p.GCSClient.Bucket(p.BucketName).Object(p.FilePath).NewWriter(ctx)
 	if _, err = io.Copy(wc, f); err != nil {
 		return err
 	}
@@ -66,7 +65,7 @@ func (p *GCS) Download() error {
 	}
 
 	ctx := context.Background()
-	reader, err := p.GCSClient.Bucket(p.BucketName).Object(p.Key).NewReader(ctx)
+	reader, err := p.GCSClient.Bucket(p.BucketName).Object(p.FilePath).NewReader(ctx)
 	if err != nil {
 		return err
 	}

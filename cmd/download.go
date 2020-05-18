@@ -104,7 +104,6 @@ func processDownload(suffix int, results *report.Results) error {
 		}
 		return p.Download()
 	case "aws":
-		key := fmt.Sprintf("%s/%s%s%0*d", basedir, prefix, suffixseparator, suffixdigits, suffix)
 		p := &providers.S3{
 			S3Client:   s3.New(internal.SetupS3Client(Region)),
 			BufferSize: bufferSize,
@@ -112,11 +111,9 @@ func processDownload(suffix int, results *report.Results) error {
 			FilePath:   path,
 			FileNumber: suffix,
 			BucketName: BucketName,
-			Key:        key,
 		}
 		return p.Download()
 	case "gcp":
-		key := fmt.Sprintf("%s/%s%s%0*d", basedir, prefix, suffixseparator, suffixdigits, suffix)
 		p := &providers.GCS{
 			GCSClient:  internal.SetupGCSClient(),
 			BufferSize: bufferSize,
@@ -124,7 +121,6 @@ func processDownload(suffix int, results *report.Results) error {
 			FilePath:   path,
 			FileNumber: suffix,
 			BucketName: BucketName,
-			Key:        key,
 		}
 		return p.Download()
 	}

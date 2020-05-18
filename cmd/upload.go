@@ -137,7 +137,6 @@ func processUpload(fileNo int, dirName string, fileName string, results *report.
 			FilePath:      path,
 			FileNumber:    fileNo,
 			BucketName:    BucketName,
-			Key:           path,
 			LocalDirName:  dirName,
 			LocalFileName: fileName,
 			PartSize:      partsize,
@@ -151,7 +150,6 @@ func processUpload(fileNo int, dirName string, fileName string, results *report.
 			FilePath:      path,
 			FileNumber:    fileNo,
 			BucketName:    BucketName,
-			Key:           path,
 			LocalDirName:  dirName,
 			LocalFileName: fileName,
 		}

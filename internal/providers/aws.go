@@ -23,7 +23,6 @@ type S3 struct {
 	BucketName string
 	FilePath   string
 	FileNumber int
-	Key        string
 	// Used only for uploads
 	LocalDirName  string
 	LocalFileName string
@@ -46,7 +45,7 @@ func (p *S3) Upload() error {
 	// Upload the file to S3!
 	result, err := uploader.Upload(&s3manager.UploadInput{
 		Bucket: aws.String(p.BucketName),
-		Key:    aws.String(p.Key),
+		Key:    aws.String(p.FilePath),
 		Body:   f,
 	}, func(u *s3manager.Uploader) {
 		u.PartSize = p.PartSize
@@ -77,7 +76,7 @@ func (p *S3) Download() error {
 
 	req := p.S3Client.GetObjectRequest(&s3.GetObjectInput{
 		Bucket: aws.String(p.BucketName),
-		Key:    aws.String(p.Key),
+		Key:    aws.String(p.FilePath),
 	})
 
 	resp, err := req.Send(context.Background())
