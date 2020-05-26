@@ -13,7 +13,6 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
-	"github.com/dliappis/blobbench/internal"
 	"github.com/dliappis/blobbench/internal/pool"
 	"github.com/dliappis/blobbench/internal/providers"
 	"github.com/dliappis/blobbench/internal/report"
@@ -105,7 +104,7 @@ func processDownload(suffix int, results *report.Results) error {
 		return p.Download()
 	case "aws":
 		p := &providers.S3{
-			S3Client:   s3.New(internal.SetupS3Client(Region)),
+			S3Client:   s3.New(providers.SetupS3Client(Region)),
 			BufferSize: bufferSize,
 			Results:    results,
 			FilePath:   path,
@@ -115,7 +114,7 @@ func processDownload(suffix int, results *report.Results) error {
 		return p.Download()
 	case "gcp":
 		p := &providers.GCS{
-			GCSClient:  internal.SetupGCSClient(),
+			GCSClient:  providers.SetupGCSClient(),
 			BufferSize: bufferSize,
 			Results:    results,
 			FilePath:   path,

@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/dliappis/blobbench/internal"
 	"github.com/dliappis/blobbench/internal/pool"
 	"github.com/dliappis/blobbench/internal/providers"
 	"github.com/dliappis/blobbench/internal/report"
@@ -131,7 +130,7 @@ func processUpload(fileNo int, dirName string, fileName string, results *report.
 		return p.Upload()
 	case "aws":
 		p := &providers.S3{
-			S3Client:      s3.New(internal.SetupS3Client(Region)),
+			S3Client:      s3.New(providers.SetupS3Client(Region)),
 			BufferSize:    bufferSize,
 			Results:       results,
 			FilePath:      path,
@@ -144,7 +143,7 @@ func processUpload(fileNo int, dirName string, fileName string, results *report.
 		return p.Upload()
 	case "gcp":
 		p := &providers.GCS{
-			GCSClient:     internal.SetupGCSClient(),
+			GCSClient:     providers.SetupGCSClient(),
 			BufferSize:    bufferSize,
 			Results:       results,
 			FilePath:      path,
