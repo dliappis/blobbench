@@ -23,8 +23,8 @@ type S3 struct {
 	S3Client   *s3.Client
 	BufferSize uint64
 	BucketName string
-	FilePath   string
-	FileNumber int
+	BucketDir  string
+	Key        string
 	// Used only for uploads
 	LocalDirName  string
 	LocalFileName string
@@ -35,7 +35,9 @@ type S3 struct {
 // Upload copies a file to an S3 Bucket.
 // Path to the local file and S3 destination object are defined in p.
 func (p *S3) Upload() error {
-	color.HiMagenta("DEBUG working on file [%s]", p.FilePath)
+	absFilePath := filepath.Join(p.LocalDirName, p.LocalFileName)
+	color.HiMagenta("DEBUG working on file [%s]", absFilePath)
+
 	uploader := s3manager.NewUploader(p.S3Client.Config)
 
 	f, err := os.Open(filepath.Join(p.LocalDirName, p.LocalFileName))
@@ -47,7 +49,7 @@ func (p *S3) Upload() error {
 	// Upload the file to S3!
 	result, err := uploader.Upload(&s3manager.UploadInput{
 		Bucket: aws.String(p.BucketName),
-		Key:    aws.String(p.FilePath),
+		Key:    aws.String(p.Key),
 		Body:   f,
 	}, func(u *s3manager.Uploader) {
 		u.PartSize = p.PartSize
@@ -62,10 +64,9 @@ func (p *S3) Upload() error {
 
 // Download ...
 func (p *S3) Download() error {
-	color.HiMagenta("DEBUG working on file [%s]", p.FilePath)
+	color.HiMagenta("DEBUG working on file [%s]", p.Key)
 	m := report.MetricRecord{
-		File: p.FilePath,
-		Idx:  p.FileNumber,
+		File: p.Key,
 	}
 
 	mr := MeasuringReader{
@@ -78,7 +79,7 @@ func (p *S3) Download() error {
 
 	req := p.S3Client.GetObjectRequest(&s3.GetObjectInput{
 		Bucket: aws.String(p.BucketName),
-		Key:    aws.String(p.FilePath),
+		Key:    aws.String(p.Key),
 	})
 
 	resp, err := req.Send(context.Background())
@@ -105,6 +106,42 @@ func (p *S3) processError(err error) report.MetricError {
 		return report.MetricError{Code: err.Code(), Message: err.Message()}
 	}
 	return report.MetricError{}
+}
+
+// ListObjects returns all or the first numFiles objects of a bucket under a specified prefix
+func (p *S3) ListObjects(maxFiles int) ([]string, error) {
+	var files []string
+
+	params := &s3.ListObjectsV2Input{
+		Bucket:    aws.String(p.BucketName),
+		Prefix:    aws.String(p.BucketDir),
+		Delimiter: aws.String("/"),
+	}
+
+	for {
+		req := p.S3Client.ListObjectsV2Request(params)
+		result, err := req.Send(context.Background())
+		if err != nil {
+			if aerr, ok := err.(awserr.Error); ok {
+				return nil, aerr
+			}
+			return nil, err
+		}
+		for _, obj := range result.Contents {
+			if maxFiles != -1 && len(files)+1 > maxFiles {
+				return files, nil
+			}
+
+			files = append(files, *obj.Key)
+		}
+
+		if !*result.IsTruncated {
+			break
+		}
+		params.ContinuationToken = result.NextContinuationToken
+	}
+
+	return files, nil
 }
 
 func baseCfg() aws.Config {

@@ -36,7 +36,6 @@ func init() {
 	uploadCmd.MarkFlagRequired("localdir")
 
 	uploadCmd.Flags().IntVar(&numWorkers, "workers", 5, "Amount of parallel upload workers")
-	uploadCmd.Flags().Uint64Var(&bufferSize, "bufsize", 8192, "Buffer size (in bytes) that each worker will use")
 
 	uploadCmd.Flags().StringVar(&destdir, "destdir", "", "The destination directory on the bucket")
 	uploadCmd.MarkFlagRequired("destdir")
@@ -82,16 +81,15 @@ func initUpload(cmd *cobra.Command, args []string) {
 	pool, _ := pool.NewPool(pool.Config{NumWorkers: numWorkers})
 	results := &report.Results{}
 
-	for i, localFileName := range localFileNames() {
+	for _, localFileName := range localFileNames() {
 		ctx := context.Background()
 		var err error
 		var task func()
 		dirName := absDir
 		fileName := localFileName
-		fileNo := i
 		task = func() {
 			// ----- TaskFunc definition -------------------------------
-			err = processUpload(fileNo, dirName, fileName, results)
+			err = processUpload(dirName, fileName, results)
 			// ---------------------------------------------------------
 
 			if err != nil {
@@ -115,15 +113,14 @@ func initUpload(cmd *cobra.Command, args []string) {
 	printResults(results, duration)
 }
 
-func processUpload(fileNo int, dirName string, fileName string, results *report.Results) error {
+func processUpload(dirName string, fileName string, results *report.Results) error {
 	path := fmt.Sprintf("%s/%s", destdir, fileName)
 
 	switch Provider {
 	case "dummy":
 		p := &providers.Dummy{
 			Results:       results,
-			FilePath:      path,
-			FileNumber:    fileNo,
+			Key:           path,
 			LocalDirName:  dirName,
 			LocalFileName: fileName,
 		}
@@ -131,11 +128,9 @@ func processUpload(fileNo int, dirName string, fileName string, results *report.
 	case "aws":
 		p := &providers.S3{
 			S3Client:      s3.New(providers.SetupS3Client(Region)),
-			BufferSize:    bufferSize,
 			Results:       results,
-			FilePath:      path,
-			FileNumber:    fileNo,
 			BucketName:    BucketName,
+			Key:           path,
 			LocalDirName:  dirName,
 			LocalFileName: fileName,
 			PartSize:      partsize,
@@ -144,11 +139,9 @@ func processUpload(fileNo int, dirName string, fileName string, results *report.
 	case "gcp":
 		p := &providers.GCS{
 			GCSClient:     providers.SetupGCSClient(),
-			BufferSize:    bufferSize,
 			Results:       results,
-			FilePath:      path,
-			FileNumber:    fileNo,
 			BucketName:    BucketName,
+			Key:           path,
 			LocalDirName:  dirName,
 			LocalFileName: fileName,
 		}

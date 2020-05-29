@@ -18,19 +18,15 @@ import (
 	"github.com/dliappis/blobbench/internal/report"
 )
 
-var bufferSize uint64
-
 var (
-	basedir                string
-	prefix                 string
-	suffixseparator        string
-	numFiles, suffixdigits int
-	numWorkers             int
-	bufsize                uint64
+	bucketDir  string
+	maxFiles   int
+	numWorkers int
+	bufferSize uint64
 
 	downloadCmd = &cobra.Command{
 		Use:   "download",
-		Short: "Download ...",
+		Short: "Stream download objects from a Bucket",
 		Long:  `TODO`,
 		Run:   initDownload,
 	}
@@ -39,35 +35,43 @@ var (
 func init() {
 	rootCmd.AddCommand(downloadCmd)
 
-	downloadCmd.Flags().StringVar(&basedir, "basedir", "", "The basedir")
-	downloadCmd.MarkFlagRequired("basedir")
-	downloadCmd.Flags().StringVar(&prefix, "prefix", "", "The prefix of the filename")
-	downloadCmd.MarkFlagRequired("prefix")
-	downloadCmd.Flags().IntVar(&numFiles, "numfiles", 2, "How many files")
-	downloadCmd.MarkFlagRequired("numfiles")
-	downloadCmd.Flags().IntVar(&suffixdigits, "suffixdigits", 4, "suffix digits, should start from 0, e.g. 4 for -0000")
-	downloadCmd.Flags().StringVar(&suffixseparator, "suffixsep", "-", "The separator for suffix e.g. 0 for -0000")
+	// FIXME; can I use a callback to add a slash to bucketdir?
+	downloadCmd.Flags().StringVar(&bucketDir, "bucketdir", "", "The location where files are stored in the bucket.")
+	downloadCmd.MarkFlagRequired("bucketdir")
+	downloadCmd.Flags().IntVar(&maxFiles, "maxfiles", -1, "Limits the amount of files to download. The order is undefined. -1 is unlimited.")
 
 	downloadCmd.Flags().IntVar(&numWorkers, "workers", 5, "Amount of parallel download workers")
-	downloadCmd.Flags().Uint64Var(&bufferSize, "bufsize", 8192, "Buffer size (in bytes) that each worker will use")
+	downloadCmd.Flags().Uint64Var(&bufferSize, "buffersize", 8192, "Buffer size (in bytes) that each worker will use")
 }
 
 func initDownload(cmd *cobra.Command, args []string) {
+	sanitizeParams()
+
 	startTime := time.Now()
 	color.Green(">>> Threadpool started")
 
 	pool, _ := pool.NewPool(pool.Config{NumWorkers: numWorkers})
 	results := &report.Results{}
 
-	for i := 0; i < numFiles; i++ {
+	files, err := listObjects()
+	if err != nil {
+		color.Red("ERROR: Unable to list files from bucket: %s, directory: %s. Error: %s.", BucketName, bucketDir, err)
+		os.Exit(1)
+	}
+
+	for idx, file := range files {
+		if maxFiles != -1 && idx+1 > maxFiles {
+			break
+		}
+
 		ctx := context.Background()
 		var err error
 		var task func()
-		suffix := i
+		key := file
 
 		task = func() {
 			// ----- TaskFunc definition -------------------------------
-			err = processDownload(suffix, results)
+			err = processDownload(key, results)
 			// ---------------------------------------------------------
 
 			if err != nil {
@@ -91,15 +95,12 @@ func initDownload(cmd *cobra.Command, args []string) {
 	printResults(results, duration)
 }
 
-func processDownload(suffix int, results *report.Results) error {
-	path := fmt.Sprintf("%s/%s%s%0*d", basedir, prefix, suffixseparator, suffixdigits, suffix)
-
+func processDownload(key string, results *report.Results) error {
 	switch Provider {
 	case "dummy":
 		p := &providers.Dummy{
-			Results:    results,
-			FilePath:   path,
-			FileNumber: suffix,
+			Results: results,
+			Key:     key,
 		}
 		return p.Download()
 	case "aws":
@@ -107,9 +108,9 @@ func processDownload(suffix int, results *report.Results) error {
 			S3Client:   s3.New(providers.SetupS3Client(Region)),
 			BufferSize: bufferSize,
 			Results:    results,
-			FilePath:   path,
-			FileNumber: suffix,
 			BucketName: BucketName,
+			BucketDir:  bucketDir,
+			Key:        key,
 		}
 		return p.Download()
 	case "gcp":
@@ -117,17 +118,37 @@ func processDownload(suffix int, results *report.Results) error {
 			GCSClient:  providers.SetupGCSClient(),
 			BufferSize: bufferSize,
 			Results:    results,
-			FilePath:   path,
-			FileNumber: suffix,
 			BucketName: BucketName,
+			BucketDir:  bucketDir,
+			Key:        key,
 		}
 		return p.Download()
 	}
 	return fmt.Errorf("Unknown provider %s", Provider)
 }
 
+func listObjects() ([]string, error) {
+	switch Provider {
+	case "aws":
+		p := &providers.S3{
+			S3Client:   s3.New(providers.SetupS3Client(Region)),
+			BucketName: BucketName,
+			BucketDir:  bucketDir,
+		}
+		return p.ListObjects(maxFiles)
+	case "gcp":
+		p := &providers.GCS{
+			GCSClient:  providers.SetupGCSClient(),
+			BucketName: BucketName,
+			BucketDir:  bucketDir,
+		}
+		return p.ListObjects(maxFiles)
+	}
+	return nil, nil
+}
+
 func printResults(results *report.Results, duration time.Duration) {
-	sort.Sort(report.ByIdx(results.Items()))
+	sort.Sort(report.ByDuration(results.Items()))
 	if OutputFile == "" {
 		printResultsStdout(results, duration)
 	} else {
@@ -141,9 +162,9 @@ func printResultsStdout(results *report.Results, duration time.Duration) {
 
 	color.Green(resultsHeader())
 	color.Green("\nSample|File|Duration (ms)|Size (MB)|Success|Err Code|Err Message")
-	sort.Sort(report.ByIdx(results.Items()))
-	for _, v := range results.Items() {
-		color.Green("%d|%s|%.1f|%.1f|%t|%s|%s", v.Idx, v.File, float64(v.Duration/time.Millisecond), float64(v.Size/1024), v.Success, v.ErrDetails.Code, v.ErrDetails.Message)
+	sort.Sort(report.ByDuration(results.Items()))
+	for idx, v := range results.Items() {
+		color.Green("%d|%s|%.1f|%.1f|%t|%s|%s", idx, v.File, float64(v.Duration/time.Millisecond), float64(v.Size/1024), v.Success, v.ErrDetails.Code, v.ErrDetails.Message)
 	}
 	color.Green(summaryOfResults(results, duration))
 	fmt.Println()
@@ -165,8 +186,8 @@ func printResultsFile(results *report.Results, duration time.Duration) {
 	_, err = fmt.Fprintf(w, "\nSample|File|Duration (ms)|Size (MB)|Throughput (MB/s)|Throughput (Mbps)|Success|Err Code|Err Message\n")
 	checkWriteErr(err)
 
-	for _, v := range results.Items() {
-		_, err = fmt.Fprintf(w, "%d|%s|%.1f|%.1f|%.1f|%.1f|%t|%s|%s\n", v.Idx, v.File, float64(v.Duration/time.Millisecond), float64(v.Size/1024/1024), float64(v.Size*1000/1024/1024)/float64(v.Duration/time.Millisecond), float64(v.Size*8*1000/1024/1024)/float64(v.Duration/time.Millisecond), v.Success, v.ErrDetails.Code, v.ErrDetails.Message)
+	for idx, v := range results.Items() {
+		_, err = fmt.Fprintf(w, "%d|%s|%.1f|%.1f|%.1f|%.1f|%t|%s|%s\n", idx, v.File, float64(v.Duration/time.Millisecond), float64(v.Size/1024/1024), float64(v.Size*1000/1024/1024)/float64(v.Duration/time.Millisecond), float64(v.Size*8*1000/1024/1024)/float64(v.Duration/time.Millisecond), v.Success, v.ErrDetails.Code, v.ErrDetails.Message)
 		checkWriteErr(err)
 	}
 
@@ -176,20 +197,23 @@ func printResultsFile(results *report.Results, duration time.Duration) {
 }
 
 func resultsHeader() string {
-	return fmt.Sprintf("\nNumber of files: [%d], Number of workers: [%d], Buffer size: [%d]\n", numFiles, numWorkers, bufferSize)
+	return fmt.Sprintf("\nMax files: [%d], Number of workers: [%d], Buffer size: [%d]\n", maxFiles, numWorkers, bufferSize)
 }
 
 func summaryOfResults(results *report.Results, duration time.Duration) string {
 	var totalBytesDownloaded uint64
+
 	for _, v := range results.Items() {
 		totalBytesDownloaded += uint64(v.Size)
 	}
+
+	totalFiles := len(results.Items())
 
 	thoughputMBps := float64(totalBytesDownloaded) / ((float64(duration) / float64(time.Millisecond)) * float64(1000))
 	sumLine := fmt.Sprintf(
 		"\nTotals:\n"+
 			"Execution Time (human)|Execution Time (ms)|Bytes Downloaded|GB Downloaded|Throughput (MB/s)|Throughput (Gbps)|Workers|Number of Files|BufferSize (B)\n"+
-			"%s|%.1f|%d|%.1f|%.1f|%.1f|%d|%d|%d", duration, float64(duration)/float64(time.Millisecond), totalBytesDownloaded, float64(totalBytesDownloaded)/float64(1024*1024*1024), thoughputMBps, float64(thoughputMBps)*8.0/1024.0, numWorkers, numFiles, bufferSize)
+			"%s|%.1f|%d|%.1f|%.1f|%.1f|%d|%d|%d", duration, float64(duration)/float64(time.Millisecond), totalBytesDownloaded, float64(totalBytesDownloaded)/float64(1024*1024*1024), thoughputMBps, float64(thoughputMBps)*8.0/1024.0, numWorkers, totalFiles, bufferSize)
 
 	return sumLine
 }
@@ -197,5 +221,11 @@ func summaryOfResults(results *report.Results, duration time.Duration) string {
 func checkWriteErr(err error) {
 	if err != nil {
 		panic(err)
+	}
+}
+
+func sanitizeParams() {
+	if bucketDir[len(bucketDir)-1:] != "/" {
+		bucketDir = bucketDir + "/"
 	}
 }

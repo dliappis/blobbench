@@ -10,6 +10,7 @@ import (
 	"github.com/fatih/color"
 	"golang.org/x/net/context"
 	"google.golang.org/api/googleapi"
+	"google.golang.org/api/iterator"
 
 	"github.com/dliappis/blobbench/internal/report"
 )
@@ -19,8 +20,8 @@ type GCS struct {
 	GCSClient     *storage.Client
 	BufferSize    uint64
 	BucketName    string
-	FilePath      string
-	FileNumber    int
+	BucketDir     string
+	Key           string
 	LocalDirName  string
 	LocalFileName string
 	Results       *report.Results
@@ -29,7 +30,8 @@ type GCS struct {
 // Upload copies a file to a GCS Bucket.
 // Path to the local file and GCS destination object are defined in p.
 func (p *GCS) Upload() error {
-	color.HiMagenta("DEBUG working on file [%s]", p.FilePath)
+	absFilePath := filepath.Join(p.LocalDirName, p.LocalFileName)
+	color.HiMagenta("DEBUG working on file [%s]", absFilePath)
 
 	ctx := context.Background()
 	f, err := os.Open(filepath.Join(p.LocalDirName, p.LocalFileName))
@@ -38,7 +40,7 @@ func (p *GCS) Upload() error {
 	}
 	defer f.Close()
 
-	wc := p.GCSClient.Bucket(p.BucketName).Object(p.FilePath).NewWriter(ctx)
+	wc := p.GCSClient.Bucket(p.BucketName).Object(p.Key).NewWriter(ctx)
 	if _, err = io.Copy(wc, f); err != nil {
 		return err
 	}
@@ -50,10 +52,9 @@ func (p *GCS) Upload() error {
 
 // Download ...
 func (p *GCS) Download() error {
-	color.HiMagenta("DEBUG working on file [%s]", p.FilePath)
+	color.HiMagenta("DEBUG working on file [%s]", p.Key)
 	m := report.MetricRecord{
-		File: p.FilePath,
-		Idx:  p.FileNumber,
+		File: p.Key,
 	}
 
 	mr := MeasuringReader{
@@ -65,7 +66,7 @@ func (p *GCS) Download() error {
 	}
 
 	ctx := context.Background()
-	reader, err := p.GCSClient.Bucket(p.BucketName).Object(p.FilePath).NewReader(ctx)
+	reader, err := p.GCSClient.Bucket(p.BucketName).Object(p.Key).NewReader(ctx)
 	if err != nil {
 		return err
 	}
@@ -87,6 +88,37 @@ func (p *GCS) processError(err error) report.MetricError {
 		return report.MetricError{Code: string(err.Code), Message: err.Body}
 	}
 	return report.MetricError{}
+}
+
+// ListObjects returns all or the first numFiles objects of a bucket under a specified prefix
+func (p *GCS) ListObjects(maxFiles int) ([]string, error) {
+	var files []string
+
+	ctx := context.Background()
+
+	ctx, cancel := context.WithTimeout(ctx, time.Second*60)
+	defer cancel()
+	it := p.GCSClient.Bucket(p.BucketName).Objects(ctx, &storage.Query{
+		Prefix:    p.BucketDir,
+		Delimiter: "/",
+	})
+
+	for {
+		if maxFiles != -1 && len(files)+1 > maxFiles {
+			return files, nil
+		}
+
+		attrs, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, attrs.Name)
+	}
+
+	return files, nil
 }
 
 // SetupGCSClient helper to setup the GCS client

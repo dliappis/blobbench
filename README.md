@@ -39,19 +39,17 @@ Suppose you have `1024` files stored on the S3 bucket `mybucket` under `mydirect
 
 Assuming your AWS credentials are correct (basically `AWS_PROFILE` env var correctly set) you can test the download performance with 5 parallel workers using:
 
-`build/blobbench_linux_amd64 --bucketname mybucket download --basedir mydirectory --prefix file --numfiles 1024 --workers 5`
+`build/blobbench_linux_amd64 --bucketname mybucket download --bucketdir mydirectory --workers 5`
 
 There are more parameters supported by the download subcommand, see below section.
 
 ## Download command
 
-The download command streams (using the AWS [GetObject](https://docs.aws.amazon.com/AmazonS3/latest/API/API) *actually* use any File IO to write to the filesystem as the intention is to benchmark the performance of the blobstore and not of the local filesystem.
+The download command streams (for AWS: using [GetObject](https://docs.aws.amazon.com/AmazonS3/latest/API/API) rather than use any File IO to write to the filesystem as the intention is to benchmark the performance of the blobstore and not of the local filesystem.
 
-The number of files can be specified with `--numfiles` and need to use a suffix starting with `0`. The actual number of decimal digits is configurable using `--suffixdigits`. For files like `testfile-000`, `testfile-001`, ... you need to use `--suffixdigits 3`.
+You can limit the number of files to download with `--maxfiles`.
 
-You can also specify the separator between the fileprefix and the suffix using `--suffixseparator`. By defaults it's `-`.
-
-The download buffer, per worker, is configurable as well; it defaults to 1KB and can be configured using `-bufsize`.
+The download buffer, per worker, is configurable as well; it defaults to 1KB and can be configured using `-buffersize`.
 
 Finally the number of parallel workers can be configured using `--workers` (default is 5). This simulates how a threadpool would work: say you specified 5 files (`file-00` ... `file-04`) and 2 workers.
 
@@ -72,6 +70,14 @@ The download schedule will be:
 
 By default metrics for each downloaded file will be printed to stdout.
 This can be changed using the global parameter `--output`.
+
+## Upload command
+
+The upload command can be used to upload all files under a local directory to a specific location on a remote bucket.
+`--localdir` is the local path containing the files to upload.
+`--destdir` specifies the location on the bucket where local files will be copied to (uploaded).
+`--partsize` specifies the part size for multipart uploads; this is AWS specific.
+`--workers` the amount of parallel workers.
 
 ## Generating a random dataset
 

@@ -7,7 +7,6 @@ import (
 
 // MetricRecord contains metric records for a specific invocation of processFile
 type MetricRecord struct {
-	Idx        int
 	Size       int // TODO change this to int64
 	File       string
 	Duration   time.Duration
@@ -21,12 +20,12 @@ type MetricError struct {
 	Message string
 }
 
-// ByIdx implements sort.Interface based on the idx field and lets us sort MetricRecord slices
-type ByIdx []MetricRecord
+// ByDuration implements sort.Interface based on the idx field and lets us sort MetricRecord slices
+type ByDuration []MetricRecord
 
-func (item ByIdx) Len() int           { return len(item) }
-func (item ByIdx) Less(i, j int) bool { return item[i].Idx < item[j].Idx }
-func (item ByIdx) Swap(i, j int)      { item[i], item[j] = item[j], item[i] }
+func (item ByDuration) Len() int           { return len(item) }
+func (item ByDuration) Less(i, j int) bool { return item[i].Duration < item[j].Duration }
+func (item ByDuration) Swap(i, j int)      { item[i], item[j] = item[j], item[i] }
 
 // Results contains all metric records from executed processFile tasks
 type Results struct {

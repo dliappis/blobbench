@@ -16,10 +16,9 @@ import (
 // Dummy ...
 type Dummy struct {
 	Results       *report.Results
-	FilePath      string
+	Key           string
 	LocalDirName  string
 	LocalFileName string
-	FileNumber    int
 }
 
 // SleepingReader ...
@@ -49,11 +48,10 @@ func (p *Dummy) Upload() error {
 
 // Download ...
 func (p *Dummy) Download() error {
-	color.HiMagenta("DEBUG working on file [%s]", p.FilePath)
+	color.HiMagenta("DEBUG working on file [%s]", p.Key)
 	var err error
 	m := report.MetricRecord{
-		File: p.FilePath,
-		Idx:  p.FileNumber,
+		File: p.Key,
 	}
 
 	mr := MeasuringReader{
