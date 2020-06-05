@@ -61,7 +61,7 @@ func absDirPath(filename string) string {
 	f, err := os.Stat(filename)
 	if err != nil {
 		// TODO return err and exit cobra with an err
-		panic(fmt.Errorf("Error accessing Parameter [%s]", filename))
+		panic(fmt.Errorf("Error accessing path [%s]. Error [%s]", filename, err))
 	}
 
 	if f.IsDir() {
@@ -70,6 +70,14 @@ func absDirPath(filename string) string {
 	}
 	// TODO return err and exit cobra with an err
 	panic(fmt.Errorf("Parameter [%s] is not a valid directory", filename))
+}
+
+func readEnvVar(envvar string) string {
+	val, success := os.LookupEnv(envvar)
+	if success != true {
+		panic(fmt.Errorf("Couldn't find env var %s", envvar))
+	}
+	return val
 }
 
 func initUpload(cmd *cobra.Command, args []string) {
@@ -138,7 +146,18 @@ func processUpload(dirName string, fileName string, results *report.Results) err
 		return p.Upload()
 	case "gcp":
 		p := &providers.GCS{
-			GCSClient:     providers.SetupGCSClient(),
+			GCSClient:     providers.SetupGCSClient(4096),
+			Results:       results,
+			BucketName:    BucketName,
+			Key:           path,
+			LocalDirName:  dirName,
+			LocalFileName: fileName,
+		}
+		return p.Upload()
+	case "azure":
+		fmt.Printf("%s %s", readEnvVar("AZURE_STORAGE_ACCOUNT"), readEnvVar("AZURE_STORAGE_KEY"))
+		p := &providers.AZBlob{
+			ServiceURL:    providers.SetupServiceURL(bufferSize, readEnvVar("AZURE_STORAGE_ACCOUNT"), readEnvVar("AZURE_STORAGE_KEY")),
 			Results:       results,
 			BucketName:    BucketName,
 			Key:           path,

@@ -4,6 +4,7 @@ go 1.14
 
 require (
 	cloud.google.com/go/storage v1.6.0
+	github.com/Azure/azure-storage-blob-go v0.8.0
 	github.com/aws/aws-sdk-go-v2 v0.20.0
 	github.com/fatih/color v1.9.0
 	github.com/mitchellh/gox v1.0.1 // indirect

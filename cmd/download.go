@@ -59,6 +59,7 @@ func initDownload(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	fmt.Println(files)
 	for idx, file := range files {
 		if maxFiles != -1 && idx+1 > maxFiles {
 			break
@@ -115,7 +116,7 @@ func processDownload(key string, results *report.Results) error {
 		return p.Download()
 	case "gcp":
 		p := &providers.GCS{
-			GCSClient:  providers.SetupGCSClient(),
+			GCSClient:  providers.SetupGCSClient(bufferSize),
 			BufferSize: bufferSize,
 			Results:    results,
 			BucketName: BucketName,
@@ -123,6 +124,17 @@ func processDownload(key string, results *report.Results) error {
 			Key:        key,
 		}
 		return p.Download()
+	case "azure":
+		p := &providers.AZBlob{
+			ServiceURL: providers.SetupServiceURL(bufferSize, readEnvVar("AZURE_STORAGE_ACCOUNT"), readEnvVar("AZURE_STORAGE_KEY")),
+			BufferSize: bufferSize,
+			Results:    results,
+			BucketName: BucketName,
+			BucketDir:  bucketDir,
+			Key:        key,
+		}
+		return p.Download()
+
 	}
 	return fmt.Errorf("Unknown provider %s", Provider)
 }
@@ -138,7 +150,14 @@ func listObjects() ([]string, error) {
 		return p.ListObjects(maxFiles)
 	case "gcp":
 		p := &providers.GCS{
-			GCSClient:  providers.SetupGCSClient(),
+			GCSClient:  providers.SetupGCSClient(bufferSize),
+			BucketName: BucketName,
+			BucketDir:  bucketDir,
+		}
+		return p.ListObjects(maxFiles)
+	case "azure":
+		p := &providers.AZBlob{
+			ServiceURL: providers.SetupServiceURL(bufferSize, readEnvVar("AZURE_STORAGE_ACCOUNT"), readEnvVar("AZURE_STORAGE_KEY")),
 			BucketName: BucketName,
 			BucketDir:  bucketDir,
 		}
