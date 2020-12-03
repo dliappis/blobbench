@@ -116,7 +116,7 @@ func processDownload(key string, results *report.Results) error {
 		return p.Download()
 	case "gcp":
 		p := &providers.GCS{
-			GCSClient:  providers.SetupGCSClient(bufferSize),
+			GCSClient:  providers.SetupGCSClient(),
 			BufferSize: bufferSize,
 			Results:    results,
 			BucketName: BucketName,
@@ -150,7 +150,7 @@ func listObjects() ([]string, error) {
 		return p.ListObjects(maxFiles)
 	case "gcp":
 		p := &providers.GCS{
-			GCSClient:  providers.SetupGCSClient(bufferSize),
+			GCSClient:  providers.SetupGCSClient(),
 			BucketName: BucketName,
 			BucketDir:  bucketDir,
 		}

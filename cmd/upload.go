@@ -146,7 +146,7 @@ func processUpload(dirName string, fileName string, results *report.Results) err
 		return p.Upload()
 	case "gcp":
 		p := &providers.GCS{
-			GCSClient:     providers.SetupGCSClient(4096),
+			GCSClient:     providers.SetupGCSClient(),
 			Results:       results,
 			BucketName:    BucketName,
 			Key:           path,
